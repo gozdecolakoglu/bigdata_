@@ -1,0 +1,12 @@
+# Büyük Veri (1 GB+) yerel veri dosyaları (GitHub 100MB limitini aşmaması için)
+data/*.csv
+data/*.jsonl
+data/*.parquet
+
+# Python önbellek ve sanal ortamlar
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+

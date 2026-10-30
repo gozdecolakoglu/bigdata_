@@ -1,0 +1,9 @@
+data/*.csv
+data/*.jsonl
+data/*.parquet
+__pycache__/
+*.pyc
+.venv/
+venv/
+.git/
+

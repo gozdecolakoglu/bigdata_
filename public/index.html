@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🛡️ Erken Risk Tespiti & XAI Karar Destek Sistemi Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .tab-btn.active {
+            border-bottom: 3px solid #3b82f6;
+            color: #60a5fa;
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .badge-Critical { background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid #ef4444; }
+        .badge-High { background: rgba(249,115,22,0.2); color: #fdba74; border: 1px solid #f97316; }
+        .badge-Medium { background: rgba(234,179,8,0.2); color: #fde047; border: 1px solid #eab308; }
+        .badge-Low { background: rgba(34,197,94,0.2); color: #86efac; border: 1px solid #22c55e; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col lg:flex-row">
+
+    <!-- SOL KENAR ÇUBUĞU (SIDEBAR): VERİ YÜKLEME & FİLTRELER -->
+    <aside class="w-full lg:w-80 bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 flex-shrink-0 space-y-5 overflow-y-auto lg:max-h-screen lg:sticky lg:top-0">
+        <div class="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+            <span class="text-2xl">🛡️</span>
+            <div>
+                <h2 class="font-bold text-slate-100 text-sm leading-tight">XAI Karar Destek & Erken Risk</h2>
+                <p class="text-xs text-slate-400">5V Büyük Veri Analitik Motoru</p>
+            </div>
+        </div>
+
+        <!-- 1. Veri Seti Yükleme -->
+        <div class="space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-blue-400">📂 1. Veri Seti Yükleme (Task & PR)</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Kendi <b>Task</b> ve <b>PR</b> dosyalarınızı (<code>.parquet</code>, <code>.csv</code>, <code>.jsonl</code>) yükleyin veya hazır 5V veri setini inceleyin.
+            </p>
+
+            <div class="bg-slate-800/70 border border-dashed border-slate-600 rounded-lg p-2.5 hover:border-blue-500 transition">
+                <label class="block text-xs font-medium text-slate-300 mb-1 cursor-pointer">
+                    📋 Görev (Task) Dosyası Seç (.parquet / .csv / .jsonl)
+                </label>
+                <input id="taskFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
+                    class="block w-full text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
+                <div id="taskUploadStatus" class="text-[11px] text-emerald-400 mt-1 truncate">Hazır veri seti aktif</div>
+            </div>
+
+            <div class="bg-slate-800/70 border border-dashed border-slate-600 rounded-lg p-2.5 hover:border-blue-500 transition">
+                <label class="block text-xs font-medium text-slate-300 mb-1 cursor-pointer">
+                    🔀 Pull Request (PR) Dosyası Seç (.parquet / .csv / .jsonl)
+                </label>
+                <input id="prFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
+                    class="block w-full text-xs text-slate-400 file:mr-2 file:py-1.5 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
+                <div id="prUploadStatus" class="text-[11px] text-emerald-400 mt-1 truncate">Hazır veri seti aktif</div>
+            </div>
+
+            <button id="resetSampleBtn" class="w-full py-1.5 px-3 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700 transition">
+                🔄 Varsayılan 5V Veri Setine Sıfırla
+            </button>
+        </div>
+
+        <!-- 2. 5V Veracity Ön İşleme -->
+        <div class="pt-3 border-t border-slate-800 space-y-2">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400">🧹 2. 5V Veracity & Ön İşleme</h3>
+            <label class="flex items-center gap-2.5 cursor-pointer bg-slate-800/60 p-2.5 rounded-lg border border-slate-700/80">
+                <input id="veracityCleanToggle" type="checkbox" class="w-4 h-4 accent-blue-600 rounded" />
+                <span class="text-xs text-slate-200 leading-snug">Veri Kusurlarını Otomatik Temizle (Clean & Impute)</span>
+            </label>
+            <p class="text-[11px] text-slate-400">
+                <code>Missing_Estimate</code> eksik eforları doldurur ve <code>Outlier_Effort</code> aykırı değerlerini düzeltir.
+            </p>
+        </div>
+
+        <!-- 3. Küresel Karar Filtreleri -->
+        <div class="pt-3 border-t border-slate-800 space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400">🔍 3. Küresel Karar Filtreleri</h3>
+
+            <div>
+                <label class="block text-xs text-slate-300 mb-1">Proje Filtresi</label>
+                <select id="filterProject" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100">
+                    <option value="ALL">Tüm Projeler</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-300 mb-1">Risk Seviyesi</label>
+                <select id="filterRiskLevel" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100">
+                    <option value="ALL">Tüm Risk Seviyeleri</option>
+                    <option value="Critical">Critical (Kritik)</option>
+                    <option value="High">High (Yüksek)</option>
+                    <option value="Medium">Medium (Orta)</option>
+                    <option value="Low">Low (Düşük)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-300 mb-1">Görev Kapsamı (Erken Tespit Odak Modu)</label>
+                <select id="filterScopeMode" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100">
+                    <option value="ALL">Tüm Görevler (Tamamlanan + Aktif)</option>
+                    <option value="ACTIVE">Sadece Aktif / Açık Görevler (Erken Müdahale)</option>
+                    <option value="DONE">Sadece Tamamlanan Görevler</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-300 mb-1">Yazılım Bileşeni (Component)</label>
+                <select id="filterComponent" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100">
+                    <option value="ALL">Tüm Bileşenler</option>
+                </select>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ANA İÇERİK ALANI -->
+    <main class="flex-1 p-4 lg:p-6 overflow-x-hidden space-y-5">
+
+        <!-- Üst Başlık -->
+        <header class="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 border-l-4 border-l-blue-500 rounded-xl p-4 lg:p-5 shadow-lg">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                    <h1 class="text-lg lg:text-2xl font-bold text-slate-50">
+                        🛡️ Teslimat Risklerinin Erken Tespiti ve Açıklanabilir Karar Destek Sistemi (XAI)
+                    </h1>
+                    <p class="text-xs lg:text-sm text-slate-400 mt-1">
+                        Büyük Veri (5V) Tabanlı Görev (Task) & Pull Request (PR / CI-CD) Erken Uyarı Radarı, Nedensel XAI Açıklamaları ve Karşı-Olgusal (What-If) Karar Simülatörü
+                    </p>
+                </div>
+                <div id="loadingBadge" class="hidden items-center gap-2 bg-blue-600/20 border border-blue-500 text-blue-300 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                    ⏳ Veri İşleniyor...
+                </div>
+            </div>
+            <div id="activeSourceBanner" class="mt-3 pt-2.5 border-t border-slate-700/70 text-xs text-slate-300 flex flex-wrap gap-x-5 gap-y-1">
+                Veri kaynakları yükleniyor...
+            </div>
+        </header>
+
+        <!-- 5 KPI Kartı -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3.5">
+            <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-4">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">📋 Analiz Edilen Görev & PR</div>
+                <div id="kpiTotalTasks" class="text-2xl font-bold text-slate-50 mt-1">-</div>
+                <div id="kpiTotalPRs" class="text-xs text-slate-400 mt-1">-</div>
+            </div>
+            <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-4">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">🚨 Erken Uyarı (Açık Riskli İşler)</div>
+                <div id="kpiEarlyAlerts" class="text-2xl font-bold text-red-400 mt-1">-</div>
+                <div id="kpiEarlyAlertsSub" class="text-xs text-slate-400 mt-1">-</div>
+            </div>
+            <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-4">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">🎯 Bileşik Erken Risk Skoru</div>
+                <div id="kpiAvgRisk" class="text-2xl font-bold text-amber-400 mt-1">-</div>
+                <div id="kpiCriticalCount" class="text-xs text-slate-400 mt-1">-</div>
+            </div>
+            <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-4">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">⏳ Teslimat Gecikme Oranı</div>
+                <div id="kpiDelayRatio" class="text-2xl font-bold text-orange-400 mt-1">-</div>
+                <div id="kpiAvgDelayDays" class="text-xs text-slate-400 mt-1">-</div>
+            </div>
+            <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-4">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400">🔀 PR & CI/CD Darboğaz Oranı</div>
+                <div id="kpiPrBottleneck" class="text-2xl font-bold text-sky-400 mt-1">-</div>
+                <div class="text-xs text-slate-400 mt-1">Yüksek/Kritik entegrasyon riskli PR</div>
+            </div>
+        </section>
+
+        <!-- SEKME BAŞLIKLARI (7 TAB) -->
+        <nav class="flex flex-wrap border-b border-slate-700 gap-1">
+            <button data-tab="tab1" class="tab-btn active px-3.5 py-2.5 text-xs font-semibold rounded-t-lg transition">📡 1. Erken Uyarı Radarı & Özet</button>
+            <button data-tab="tab2" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">🤖 2. ML Erken Tespit & Küresel XAI</button>
+            <button data-tab="tab3" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">🔍 3. Tekil Görev/PR XAI Müfettişi</button>
+            <button data-tab="tab4" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">🎛️ 4. What-If Karar Simülatörü</button>
+            <button data-tab="tab5" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">🔀 5. PR & CI/CD Analitiği</button>
+            <button data-tab="tab6" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">🏛️ 6. Büyük Veri (5V) & Canlı Akış</button>
+            <button data-tab="tab7" class="tab-btn px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-t-lg transition">📥 7. Aksiyon Planı & Rapor İndir</button>
+        </nav>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 1: ERKEN UYARI RADARI VE YÖNETİCİ ÖZETİ -->
+        <!-- ================================================================= -->
+        <section id="tab1" class="tab-panel space-y-5">
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h2 class="text-base font-bold text-slate-100">📡 Teslimat Risklerinin Erken Tespiti — Henüz Tamamlanmamış Görevlerde Kritik Radar</h2>
+                <p class="text-xs text-slate-400 mt-1 mb-3">
+                    Henüz tamamlanmamış (<code>status != Done</code>) görevleri ve bunlara bağlı açık <b>Pull Request / CI-CD</b> sinyallerini birleştirerek teslimat tarihi (<code>due_date</code>) gelmeden önce gecikme olasılığını ve alınması gereken aksiyonu listeler. Bir satıra tıklayarak doğrudan <b>Tekil XAI Müfettişinde</b> inceleyebilirsiniz.
+                </p>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900/90 text-slate-300 sticky top-0">
+                            <tr>
+                                <th class="p-2.5 border-b border-slate-700">Görev ID</th>
+                                <th class="p-2.5 border-b border-slate-700">Proje</th>
+                                <th class="p-2.5 border-b border-slate-700">Bileşen</th>
+                                <th class="p-2.5 border-b border-slate-700">Durum</th>
+                                <th class="p-2.5 border-b border-slate-700">Sorumlu</th>
+                                <th class="p-2.5 border-b border-slate-700">Hedef Teslim</th>
+                                <th class="p-2.5 border-b border-slate-700">Erken Risk Skoru</th>
+                                <th class="p-2.5 border-b border-slate-700">Gecikme Olasılığı</th>
+                                <th class="p-2.5 border-b border-slate-700">XAI Risk Nedenleri</th>
+                                <th class="p-2.5 border-b border-slate-700">Önerilen Erken Müdahale Aksiyonu</th>
+                            </tr>
+                        </thead>
+                        <tbody id="earlyRadarTableBody" class="divide-y divide-slate-700/60 text-slate-200"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">📊 Proje Bazlı Risk Sınıfı Dağılımı</h3>
+                    <div class="h-72"><canvas id="chartProjectRisk"></canvas></div>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">📈 Sprint Dönemlerine Göre Teslimat Riski ve Gecikme Eğilimi</h3>
+                    <div class="h-72"><canvas id="chartSprintTrend"></canvas></div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h3 class="text-sm font-bold text-slate-100 mb-2">🔥 Proje x Yazılım Bileşeni Erken Risk Isı Haritası (Heatmap)</h3>
+                <div id="heatmapContainer" class="overflow-x-auto"></div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 2: ML ERKEN TESPİT MOTORU VE KÜRESEL XAI -->
+        <!-- ================================================================= -->
+        <section id="tab2" class="tab-panel hidden space-y-5">
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h2 class="text-base font-bold text-slate-100">🤖 Makine Öğrenmesi ile Erken Gecikme Tahmini ve Küresel Öznitelik Önemi (Global XAI)</h2>
+                <p class="text-xs text-slate-400 mt-1">
+                    Görev bitiş tarihi gerçekleşmeden önce bilinen 13 erken sinyali (Görev karmaşıklığı, iyimser efor tahmini, bağımlılık sayısı, blocker, kapsam değişimi ve ilişkili PR'ların ilk kod inceleme/CI-CD sinyalleri) kullanarak teslimat gecikmesini tahmin eder.
+                </p>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3">
+                        <div class="text-[11px] text-slate-400">ROC-AUC Skoru</div>
+                        <div id="mlRocAuc" class="text-xl font-bold text-emerald-400 mt-0.5">0.920</div>
+                        <div class="text-[10px] text-slate-500">Yüksek Ayırt Edicilik</div>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3">
+                        <div class="text-[11px] text-slate-400">Doğruluk (Accuracy)</div>
+                        <div id="mlAccuracy" class="text-xl font-bold text-blue-400 mt-0.5">%84.9</div>
+                        <div class="text-[10px] text-slate-500">Erken Sınıflandırma</div>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3">
+                        <div class="text-[11px] text-slate-400">F1-Skoru (Dengeli)</div>
+                        <div id="mlF1" class="text-xl font-bold text-indigo-400 mt-0.5">0.874</div>
+                        <div class="text-[10px] text-slate-500">Harmonik Ortalama</div>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3">
+                        <div class="text-[11px] text-slate-400">Kesinlik (Precision)</div>
+                        <div id="mlPrecision" class="text-xl font-bold text-amber-400 mt-0.5">%88.6</div>
+                        <div class="text-[10px] text-slate-500">Pozitif Tahmin Gücü</div>
+                    </div>
+                    <div class="bg-slate-900/80 border border-slate-700 rounded-lg p-3">
+                        <div class="text-[11px] text-slate-400">Duyarlılık (Recall)</div>
+                        <div id="mlRecall" class="text-xl font-bold text-teal-400 mt-0.5">%86.1</div>
+                        <div class="text-[10px] text-slate-500">Erken Yakalama Oranı</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">🌐 Küresel XAI: Teslimat Gecikmesini Tetikleyen En Önemli Erken Sinyaller</h3>
+                    <div class="h-80"><canvas id="chartGlobalXai"></canvas></div>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100 mb-2">🧠 En Sık Karşılaşılan Nedensel XAI Risk Örüntüleri</h3>
+                        <div class="overflow-x-auto max-h-52">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead class="bg-slate-900 text-slate-300">
+                                    <tr>
+                                        <th class="p-2 border-b border-slate-700">XAI Birincil Risk Faktörü Kombinasyonu</th>
+                                        <th class="p-2 border-b border-slate-700">Görev</th>
+                                        <th class="p-2 border-b border-slate-700">Oran</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topXaiPatternsBody" class="divide-y divide-slate-700/60"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100 mb-2">🎯 Doğrulama Karmaşıklık Matrisi (Confusion Matrix)</h3>
+                        <div id="confusionMatrixBox" class="grid grid-cols-2 gap-2 text-xs"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 3: TEKİL GÖREV / PR XAI KARAR MÜFETTİŞİ -->
+        <!-- ================================================================= -->
+        <section id="tab3" class="tab-panel hidden space-y-5">
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">İncelenecek Görevi Seçin (En Riskli Görevler)</label>
+                        <select id="inspectorTaskSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-1">Veya Doğrudan Görev ID Arayın (Örn: TASK-100005)</label>
+                        <div class="flex gap-2">
+                            <input id="inspectorSearchInput" type="text" placeholder="TASK-100001..."
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100" />
+                            <button id="inspectorSearchBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition">
+                                Bul
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Görev Özet Kartı -->
+            <div id="inspectorHeaderCard" class="bg-slate-800 border border-slate-700 rounded-xl p-4"></div>
+
+            <!-- XAI Açıklama ve Önerilen Aksiyon Kutuları -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-amber-950/30 border border-amber-600/50 border-l-4 border-l-amber-500 rounded-xl p-4">
+                    <div class="text-xs font-bold text-amber-400 mb-1">🧠 XAI Nedensel Risk Açıklaması (Neden Bu Görev Riskli?)</div>
+                    <div id="inspectorXaiFactors" class="text-sm text-slate-100 font-medium"></div>
+                </div>
+                <div class="bg-teal-950/30 border border-teal-600/50 border-l-4 border-l-teal-400 rounded-xl p-4">
+                    <div class="text-xs font-bold text-teal-300 mb-1">💡 Önerilen Karar Destek Aksiyonu (Ne Yapılmalı?)</div>
+                    <div id="inspectorXaiActions" class="text-sm text-slate-100 font-medium"></div>
+                </div>
+            </div>
+
+            <!-- Lokal SHAP Katkı Grafiği & Görev Detayları -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">📊 Lokal XAI Faktör Katkı Analizi (SHAP-Stili Puan Dağılımı)</h3>
+                    <div class="h-72"><canvas id="chartLocalXai"></canvas></div>
+                </div>
+                <div id="inspectorTaskDetails" class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 text-xs space-y-2"></div>
+            </div>
+
+            <!-- Bağlı PR Listesi -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h3 id="inspectorPrHeader" class="text-sm font-bold text-slate-100 mb-3">🔀 Bu Göreve Bağlı Pull Request (PR) ve CI/CD Kayıtları</h3>
+                <div id="inspectorPrList" class="space-y-3"></div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 4: WHAT-IF (KARŞI-OLGUSAL) KARAR SİMÜLATÖRÜ -->
+        <!-- ================================================================= -->
+        <section id="tab4" class="tab-panel hidden space-y-5">
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h2 class="text-base font-bold text-slate-100">🎛️ Karşı-Olgusal (Counterfactual / What-If) XAI Karar Destek Simülatörü</h2>
+                <p class="text-xs text-slate-400 mt-1">
+                    Bir görevin parametrelerine <b>erken müdahale ettiğinizde</b> (blocker'ları çözdüğünüzde, büyük görevi alt görevlere böldüğünüzde veya PR boyutunu küçülttüğünüzde) teslimat risk skorunun ve gecikme gününün nasıl düşeceğini canlı simüle edin.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-4">
+                    <!-- Sütun 1 -->
+                    <div class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-700/80">
+                        <h4 class="text-xs font-bold text-blue-400 uppercase">1️⃣ Görev Kapsam & Planlama</h4>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Story Points (Karmaşıklık)</span><b id="valSimSp">8</b></label>
+                            <input id="simSp" type="range" min="1" max="21" step="1" value="8" class="w-full accent-blue-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Tahmini Efor (Saat)</span><b id="valSimEffort">32</b></label>
+                            <input id="simEffort" type="range" min="2" max="160" step="2" value="32" class="w-full accent-blue-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-300 mb-1">Görev Önceliği (Priority)</label>
+                            <select id="simPriority" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs">
+                                <option value="Low">Low</option>
+                                <option value="Medium">Medium</option>
+                                <option value="High" selected>High</option>
+                                <option value="Critical">Critical</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-300 mb-1">Hedef Ortam (Environment)</label>
+                            <select id="simEnv" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs">
+                                <option value="Development">Development</option>
+                                <option value="Test">Test</option>
+                                <option value="Staging">Staging</option>
+                                <option value="Production" selected>Production</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Sütun 2 -->
+                    <div class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-700/80">
+                        <h4 class="text-xs font-bold text-amber-400 uppercase">2️⃣ Süreç Darboğazları & Bağımlılık</h4>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Blocker (Engel) Sayısı</span><b id="valSimBlocker">1</b></label>
+                            <input id="simBlocker" type="range" min="0" max="5" step="1" value="1" class="w-full accent-amber-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Ön Koşul Bağımlılık (Dependencies)</span><b id="valSimDep">2</b></label>
+                            <input id="simDep" type="range" min="0" max="5" step="1" value="2" class="w-full accent-amber-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Scope Creep (Kapsam Değişimi)</span><b id="valSimScope">1</b></label>
+                            <input id="simScope" type="range" min="0" max="5" step="1" value="1" class="w-full accent-amber-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>Testten Geri Dönüş (Reopen)</span><b id="valSimReopen">0</b></label>
+                            <input id="simReopen" type="range" min="0" max="4" step="1" value="0" class="w-full accent-amber-500 mt-1" />
+                        </div>
+                    </div>
+
+                    <!-- Sütun 3 -->
+                    <div class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-700/80">
+                        <h4 class="text-xs font-bold text-sky-400 uppercase">3️⃣ PR & CI/CD Entegrasyon Kalitesi</h4>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>PR Değişen Dosya Sayısı</span><b id="valSimPrFiles">14</b></label>
+                            <input id="simPrFiles" type="range" min="1" max="50" step="1" value="14" class="w-full accent-sky-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>PR Eklenen Kod Satırı (+Lines)</span><b id="valSimPrLines">450</b></label>
+                            <input id="simPrLines" type="range" min="10" max="2500" step="25" value="450" class="w-full accent-sky-500 mt-1" />
+                        </div>
+                        <div>
+                            <label class="flex justify-between text-xs text-slate-300"><span>CI/CD Pipeline Kırılma Sayısı</span><b id="valSimCiFails">1</b></label>
+                            <input id="simCiFails" type="range" min="0" max="6" step="1" value="1" class="w-full accent-sky-500 mt-1" />
+                        </div>
+                        <label class="flex items-center gap-2 pt-2 cursor-pointer">
+                            <input id="simConflict" type="checkbox" checked class="w-4 h-4 accent-red-500 rounded" />
+                            <span class="text-xs text-slate-200">PR Merge Çakışması (Conflict) Var mı?</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Simülasyon Sonuç Kartları -->
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-3.5 mt-5">
+                    <div class="bg-slate-900 border border-slate-700 rounded-xl p-3.5">
+                        <div class="text-xs text-slate-400">Simüle Edilen Bileşik Risk Skoru</div>
+                        <div id="simOutRisk" class="text-2xl font-bold text-amber-400 mt-1">-</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-700 rounded-xl p-3.5">
+                        <div class="text-xs text-slate-400">Simüle Edilen Gecikme Olasılığı</div>
+                        <div id="simOutProb" class="text-2xl font-bold text-orange-400 mt-1">-</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-700 rounded-xl p-3.5">
+                        <div class="text-xs text-slate-400">Tahmini Gecikme Süresi</div>
+                        <div id="simOutDelay" class="text-2xl font-bold text-red-400 mt-1">-</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-700 rounded-xl p-3.5">
+                        <div class="text-xs text-slate-400">Simüle Edilen Risk Sınıfı</div>
+                        <div id="simOutLevel" class="text-2xl font-bold text-slate-100 mt-1">-</div>
+                    </div>
+                </div>
+
+                <!-- Karşı-olgusal Reçete -->
+                <div class="mt-4 bg-slate-900/90 border border-slate-700 rounded-xl p-4">
+                    <h4 class="text-xs font-bold uppercase text-teal-400 mb-2">🩺 XAI Karşı-Olgusal (Counterfactual) Karar Reçetesi</h4>
+                    <ul id="simPrescriptions" class="space-y-1.5 text-xs text-slate-200 list-disc list-inside"></ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 5: PR, KOD İNCELEME & CI/CD ANALİTİĞİ -->
+        <!-- ================================================================= -->
+        <section id="tab5" class="tab-panel hidden space-y-5">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                    <div class="text-xs text-slate-400">Toplam İncelenen PR</div>
+                    <div id="prMetricTotal" class="text-2xl font-bold text-slate-100 mt-1">-</div>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                    <div class="text-xs text-slate-400">Merge Çakışması (Conflict) Oranı</div>
+                    <div id="prMetricConflict" class="text-2xl font-bold text-red-400 mt-1">-</div>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                    <div class="text-xs text-slate-400">Ort. Birleştirme Süresi (Merge)</div>
+                    <div id="prMetricMergeTime" class="text-2xl font-bold text-amber-400 mt-1">-</div>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                    <div class="text-xs text-slate-400">CI/CD Pipeline Kırılma Oranı</div>
+                    <div id="prMetricCiFail" class="text-2xl font-bold text-sky-400 mt-1">-</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">⚔️ Merge Conflict Durumuna Göre Ort. Birleştirme Süresi (Saat)</h3>
+                    <div class="h-64"><canvas id="chartPrConflict"></canvas></div>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-3">🛡️ Güvenlik Taraması (SAST/CVE) Dağılımı</h3>
+                    <div class="h-64"><canvas id="chartPrSecurity"></canvas></div>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h3 class="text-sm font-bold text-slate-100 mb-2">👨‍💻 Geliştirici / Sorumlu Bazlı Görev ve PR Risk Yükü Matrisi</h3>
+                <div class="overflow-x-auto max-h-80">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900 text-slate-300 sticky top-0">
+                            <tr>
+                                <th class="p-2.5 border-b border-slate-700">Geliştirici (Assignee)</th>
+                                <th class="p-2.5 border-b border-slate-700">Toplam Görev</th>
+                                <th class="p-2.5 border-b border-slate-700">Açık Görev</th>
+                                <th class="p-2.5 border-b border-slate-700">Kritik/Yüksek Riskli</th>
+                                <th class="p-2.5 border-b border-slate-700">Ort. Erken Risk</th>
+                                <th class="p-2.5 border-b border-slate-700">Gecikme Oranı (%)</th>
+                                <th class="p-2.5 border-b border-slate-700">Toplam PR Conflict</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devWorkloadTableBody" class="divide-y divide-slate-700/60"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 6: BÜYÜK VERİ (5V), VERACITY & CANLI AKIŞ -->
+        <!-- ================================================================= -->
+        <section id="tab6" class="tab-panel hidden space-y-5">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-2">🔍 4V - Veracity (Görev Veri Kalitesi & Kusur Dağılımı)</h3>
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900 text-slate-300">
+                            <tr>
+                                <th class="p-2 border-b border-slate-700">Veri Kalitesi Etiketi (data_quality_flag)</th>
+                                <th class="p-2 border-b border-slate-700">Kayıt Sayısı</th>
+                                <th class="p-2 border-b border-slate-700">Oran (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="taskVeracityBody" class="divide-y divide-slate-700/60"></tbody>
+                    </table>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                    <h3 class="text-sm font-bold text-slate-100 mb-2">🔍 4V - Veracity (PR Veri Kalitesi & Kusur Dağılımı)</h3>
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900 text-slate-300">
+                            <tr>
+                                <th class="p-2 border-b border-slate-700">PR Veri Kalitesi Etiketi (data_quality_flag)</th>
+                                <th class="p-2 border-b border-slate-700">Kayıt Sayısı</th>
+                                <th class="p-2 border-b border-slate-700">Oran (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prVeracityBody" class="divide-y divide-slate-700/60"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
+                <h3 class="text-sm font-bold text-slate-100 mb-2">⚡ 2V - Velocity: Gerçek Zamanlı CI/CD & PR Olay Akışı (Streaming Event Radar)</h3>
+                <div class="overflow-x-auto max-h-80">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900 text-slate-300 sticky top-0">
+                            <tr>
+                                <th class="p-2 border-b border-slate-700">Olay ID</th>
+                                <th class="p-2 border-b border-slate-700">Zaman Damgası</th>
+                                <th class="p-2 border-b border-slate-700">Olay Türü</th>
+                                <th class="p-2 border-b border-slate-700">Proje</th>
+                                <th class="p-2 border-b border-slate-700">Bileşen</th>
+                                <th class="p-2 border-b border-slate-700">Görev / PR</th>
+                                <th class="p-2 border-b border-slate-700">Geliştirici</th>
+                                <th class="p-2 border-b border-slate-700">Anlık Risk Deltası</th>
+                                <th class="p-2 border-b border-slate-700">XAI Akış Uyarısı</th>
+                            </tr>
+                        </thead>
+                        <tbody id="streamTableBody" class="divide-y divide-slate-700/60"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- SEKME 7: AKSİYON PLANI & RAPOR İNDİR -->
+        <!-- ================================================================= -->
+        <section id="tab7" class="tab-panel hidden space-y-5">
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-4">
+                <div>
+                    <h2 class="text-base font-bold text-slate-100">📥 Erken Müdahale Aksiyon Planı ve Karar Destek Raporu İndir</h2>
+                    <p class="text-xs text-slate-400 mt-1">
+                        Seçili filtrelere göre erken müdahale gerektiren yüksek riskli görevlerin ve XAI aksiyon önerilerinin tam listesini yönetim toplantıları veya Jira/DevOps entegrasyonu için dışa aktarın.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button id="downloadCsvBtn" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition">
+                        📊 XAI Erken Risk ve Aksiyon Raporunu İndir (.CSV)
+                    </button>
+                    <button id="downloadJsonBtn" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition">
+                        📄 XAI Erken Risk ve Aksiyon Raporunu İndir (.JSON)
+                    </button>
+                </div>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900 text-slate-300 sticky top-0">
+                            <tr>
+                                <th class="p-2 border-b border-slate-700">Görev ID</th>
+                                <th class="p-2 border-b border-slate-700">Başlık</th>
+                                <th class="p-2 border-b border-slate-700">Proje</th>
+                                <th class="p-2 border-b border-slate-700">Durum</th>
+                                <th class="p-2 border-b border-slate-700">Erken Risk</th>
+                                <th class="p-2 border-b border-slate-700">Risk Sınıfı</th>
+                                <th class="p-2 border-b border-slate-700">XAI Nedenleri</th>
+                                <th class="p-2 border-b border-slate-700">Önerilen Karar Destek Aksiyonu</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exportPreviewBody" class="divide-y divide-slate-700/60"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script type="module" src="/app.js"></script>
+</body>
+</html>
+

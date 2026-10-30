@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-10-30T16:05:17.697997",
+  "project_title": "Yazılım Projelerinde Teslimat Risklerinin Büyük Veri ile Erken Tespiti ve Açıklanabilir Karar Destek Sistemi",
+  "big_data_5v_metrics": {
+    "volume": {
+      "tasks_row_count": 80000,
+      "prs_row_count": 151105,
+      "total_records_per_format": 231105,
+      "total_serialized_records_across_3_formats": 693315,
+      "tasks_columns": 38,
+      "prs_columns": 49,
+      "total_disk_size_mb": 1000.4
+    },
+    "variety": [
+      "CSV (Structured)",
+      "Parquet (Columnar/Spark)",
+      "JSONL (Semi-Structured/NoSQL)",
+      "Natural Language Text & Git Diffs (Unstructured)"
+    ],
+    "velocity": {
+      "time_range_start": "2025-01-01T08:04:21",
+      "time_range_end": "2026-10-21T03:44:45",
+      "streaming_simulator": "velocity_stream_simulator.py"
+    },
+    "veracity": {
+      "task_quality_distribution": {
+        "Clean": 73677,
+        "Missing_Estimate": 2027,
+        "Outlier_Effort": 1568,
+        "Incomplete_Metadata": 1567,
+        "Clock_Skew_Corrected": 1161
+      },
+      "pr_quality_distribution": {
+        "Clean": 140629,
+        "Outlier_Diff_Size": 4444,
+        "Missing_Doc_Link": 3074,
+        "Clock_Skew_Anomaly": 2958
+      }
+    },
+    "value_xai": {
+      "delayed_task_ratio": 0.6108,
+      "task_risk_level_distribution": {
+        "Medium": 26097,
+        "High": 24703,
+        "Critical": 15745,
+        "Low": 13455
+      },
+      "pr_risk_level_distribution": {
+        "Critical": 66397,
+        "Medium": 39205,
+        "High": 26855,
+        "Low": 18648
+      }
+    }
+  },
+  "files": {
+    "tasks_parquet": {
+      "path": "tasks_dataset.parquet",
+      "size_mb": 4.85
+    },
+    "prs_parquet": {
+      "path": "pull_requests_dataset.parquet",
+      "size_mb": 19.75
+    },
+    "tasks_csv": {
+      "path": "tasks_dataset.csv",
+      "size_mb": 95.79
+    },
+    "prs_csv": {
+      "path": "pull_requests_dataset.csv",
+      "size_mb": 297.53
+    },
+    "tasks_jsonl": {
+      "path": "tasks_dataset.jsonl",
+      "size_mb": 149.87
+    },
+    "prs_jsonl": {
+      "path": "pull_requests_dataset.jsonl",
+      "size_mb": 432.61
+    }
+  }
+}
