@@ -33,6 +33,7 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 
 class WhatIfRequest(BaseModel):
@@ -137,7 +138,10 @@ def simulate_what_if(req: WhatIfRequest) -> Dict[str, Any]:
     }
 
 
-# Yerel testlerde static dosyaları da sunması için:
+# Yerel ve sunucu ortamlarında data/ ve public/ dizinlerini doğrudan sun:
+if os.path.exists(DATA_DIR):
+    app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
+
 if os.path.exists(PUBLIC_DIR):
     @app.get("/")
     def serve_index():

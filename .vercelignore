@@ -1,6 +1,6 @@
 data/*.csv
-data/*.jsonl
-data/*.parquet
+data/tasks_dataset.jsonl
+data/pull_requests_dataset.jsonl
 __pycache__/
 *.pyc
 .venv/

@@ -1,7 +1,7 @@
-# Büyük Veri (1 GB+) yerel veri dosyaları (GitHub 100MB limitini aşmaması için)
+# Büyük Veri (100MB+ ham CSV/JSONL dosyaları GitHub 100MB limitini aşmaması için hariç tutulur; Parquet dosyaları sıkıştırılmış olarak dahildir)
 data/*.csv
 data/*.jsonl
-data/*.parquet
+!data/velocity_event_stream.jsonl
 
 # Python önbellek ve sanal ortamlar
 __pycache__/

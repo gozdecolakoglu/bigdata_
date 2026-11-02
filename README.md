@@ -166,100 +166,49 @@ Görev (Task) ve Pull Request (PR) veri setleri yüklendiğinde teslimat gecikme
 py -m streamlit run dashboard.py --server.headless true
 ```
 
-### A. Sol Kenar Çubuğu (Sidebar) & Üst KPI Gösterge Paneli
-- **1. Veri Seti Yükleme Merkezi (Task & PR):** `.parquet`, `.csv` ve `.jsonl` formatlarında Görev (`tasks_dataset`) ve Pull Request (`pull_requests_dataset`) dosyalarını sürükle-bırak ile yükleme veya hazır 5V veri setini tek tıkla analiz etme. Eksik risk veya XAI sütunları varsa sistem ham veriden otomatik olarak hesaplar.
-- **2. 5V Veracity & Ön İşleme (Clean & Impute Toggle):** Tek tıkla `Missing_Estimate` eksik efor tahminlerini Story Point bazlı doldurma (`story_points * 5.8`) ve `Outlier_Effort` / `Outlier_Diff_Size` aykırı değerlerini otomatik temizleme.
-- **3. Küresel Karar Filtreleri:** Proje, Risk Seviyesi (`Critical`, `High`, `Medium`, `Low`), Görev Kapsamı (*Tüm Görevler*, *Sadece Aktif/Açık Görevler - Erken Müdahale Odaklı*, *Sadece Tamamlanan Görevler*) ve Yazılım Bileşeni (`Component`) filtreleri.
-- **5 Üst Düzey KPI Kartı:**
-  1. **📋 Analiz Edilen Görev & PR:** Filtrelenen toplam görev ve bunlara bağlı ilişkisel (`1:N`) Pull Request sayısı.
-  2. **🚨 Erken Uyarı (Açık Riskli İşler):** Henüz tamamlanmamış (`status != Done`) ve Bileşik Erken Risk Skoru `>= 50` olan acil müdahale bekleyen görev sayısı.
-  3. **🎯 Bileşik Erken Risk Skoru:** Görev planlama riski (`%62`) ve PR entegrasyon riskinin (`%38`) ağırlıklı ortalaması (`0-100`) ile Kritik/Yüksek riskli görev oranı.
-  4. **⏳ Teslimat Gecikme Oranı:** Geciken görevlerin yüzdesi (`is_delayed == 1`) ve geciken işlerde ortalama gün sapması (`delay_days`).
-  5. **🔀 PR & CI/CD Darboğaz Oranı:** Yüksek veya Kritik entegrasyon riski taşıyan Pull Request yüzdesi.
+### A. Sadeleştirilmiş Sol Menü (Sidebar) & 4 Özet KPI Kartı
+- **Hızlı Filtreler:** Tek seçimli temiz açılır listelerle *Görev Durumu* (`Tüm Görevler`, `Sadece Açık Görevler`, `Sadece Tamamlanan Görevler`), *Proje*, *Risk Seviyesi* (`Critical`, `High`, `Medium`, `Low`) ve *Yazılım Modülü (`Component`)* filtreleme.
+- **🧹 Otomatik Veri Temizleme (Veracity Toggle):** Tek tıkla eksik efor tahminlerini (`Missing_Estimate`) doldurma ve aykırı değerleri (`Outlier_Effort` / `Outlier_Diff_Size`) düzeltme.
+- **📂 Başka Veri Seti Yükle (Daraltılabilir Panel):** Ekranı kalabalıklaştırmamak için açılır-kapanır kutu içinde `.parquet`, `.csv` ve `.jsonl` formatlarında Task ve PR dosyası yükleme.
+- **📥 Hızlı Rapor İndir:** Sol menünün altından doğrudan `.CSV` ve `.JSON` formatında karar destek raporunu dışa aktarma.
+- **4 Renk Kodlu KPI Kartı:**
+  1. **📋 İncelenen Görev & PR:** Filtrelenen görev ve bağlı Pull Request sayısı.
+  2. **🚨 Acil Müdahale Bekleyen:** Henüz tamamlanmamış (`status != Done`) ve yüksek riskli (`>= 50`) açık görev sayısı.
+  3. **🎯 Ortalama Risk Skoru:** Görev planlama (`%62`) ve PR entegrasyon (`%38`) ağırlıklı bileşik risk ortalaması (`0-100`).
+  4. **⏳ Teslimat Gecikme Oranı:** Geciken görevlerin yüzdesi ve ortalama gün sapması.
 
 ---
 
-### B. Dashboard'da Yer Alan 7 Ana Başlık (Sekme) ve İçerik Detayları
+### B. Dashboard'da Yer Alan 6 Ana Sekme ve İçerik Detayları
 
-#### 📡 1. Erken Uyarı Radarı & Özet (`Sekme 1`)
-Henüz tamamlanmamış (`status != Done`) görevleri ve bunlara bağlı açık Pull Request / CI-CD sinyallerini (`task_id == linked_task_issue`) birleştirerek teslimat tarihi (`due_date`) gelmeden önce gecikme olasılığını tespit eder:
-- **Kritik Erken Uyarı Radarı Tablosu:** En yüksek riskli açık görevleri; *Görev ID, Proje, Bileşen, Durum, Öncelik, Sorumlu, Hedef Teslim Tarihi, Bileşik Erken Risk Skoru (0-100 ilerleme çubuğu), Erken Gecikme Olasılığı (%), Blocker sayısı, PR Conflict sayısı, CI Hata sayısı, XAI Risk Nedenleri* ve *Önerilen Erken Müdahale Aksiyonu* sütunlarıyla listeler (Web arayüzünde satıra tıklandığında doğrudan 3. sekmedeki Tekil Müfettiş'te açılır).
-- **📊 Proje Bazlı Risk Sınıfı Dağılımı Grafiği:** Her projedeki görevlerin `Critical`, `High`, `Medium` ve `Low` risk sınıflarına göre yığılmış sütun/çubuk dağılımı.
-- **🔥 Proje x Yazılım Bileşeni Erken Risk Isı Haritası (Heatmap):** Hangi projenin hangi yazılım modülünde (`Backend`, `Frontend`, `API Gateway`, `Database`, `DevOps & CI/CD` vb.) ortalama erken risk skorunun ve gecikme yüzdesinin yoğunlaştığını gösteren 2 boyutlu ısı matrisi.
-- **📈 Sprint Dönemlerine Göre Teslimat Riski ve Gecikme Eğilimi (Velocity Trend):** `Sprint-01`'den `Sprint-36`'ya kadar tüm sprint dönemlerinde *Ortalama Bileşik Erken Risk Skoru* (mavi çizgi) ile *Geciken Görev Oranı (%)* (turuncu kesikli çizgi) zaman serisi karşılaştırması.
+#### 📡 1. Erken Uyarı & Genel Bakış (`Sekme 1`)
+- **🚨 Acil Müdahale Bekleyen Görevler Tablosu:** Yatay kaydırma karmaşasını önlemek için en kritik 7 sütunla (*Görev, Proje & Modül, Sorumlu & Teslim, Erken Risk Skoru, Neden Riskli? (XAI Özeti), Önerilen Müdahale, İncele*) özetlenmiştir. Satıra tıklandığında doğrudan 2. sekmedeki görev müfettişini açar.
+- **📊 Projelere Göre Risk Dağılımı & 📈 Sprint Bazlı Risk Eğilimi:** Yan yana iki net grafikle proje bazlı risk yükünü ve sprint dönemlerindeki gecikme trendini gösterir.
+- **🔥 Proje x Yazılım Modülü Risk Isı Haritası (Heatmap):** Ana ekranı boğmamak için isteğe bağlı açılır (`details` / `expander`) panel içinde sunulur.
 
----
+#### 🔍 2. Görev & PR Müfettişi — Neden Riskli? (`Sekme 2`)
+Seçilen veya ID ile aranan (`TASK-100001` vb.) tek bir görevin neden riskli olduğunu ve ne yapılması gerektiğini adım adım açıklar:
+- **1. Neden Bu Görev Riskli? (XAI Teşhisi)** ve **2. Ne Yapılmalı? (Karar Destek Önerisi)** kutuları.
+- **📊 Risk Puanını Artıran ve Azaltan Faktörler:** Faktörlerin risk puanına olan yerel katkılarını kırmızı (`+` risk artırıcı) ve yeşil (`-` risk azaltıcı) barlarla gösterir.
+- **📋 Görev Planlama Özeti & Bağlı PR Kartları:** Göreve bağlı PR'ları tek satırlık özet rozetlerle listeler; uzun `git diff` kod yamaları varsayılan olarak gizlidir ve tıklandığında açılır.
 
-#### 🤖 2. ML Erken Tespit Motoru & Küresel XAI (`Sekme 2`)
-Görev tamamlanmadan **önce** bilinen 13 erken sinyali kullanarak teslimat gecikmesini (`is_delayed`) tahmin eden makine öğrenmesi (`RandomForestClassifier`) motoru ve küresel açıklanabilirlik (Global XAI) katmanıdır:
-- **Kullanılan 13 Erken Uyarı Özniteliği:**
-  - *Görev Planlama Sinyalleri (9 öznitelik):* `blocker_count` (Blocker sayısı), `dependency_count_calc` (Bağımlılık sayısı), `requirement_change_count` (Scope Creep / kapsam değişimi), `reopen_count` (Testten geri dönüş), `story_points` (Karmaşıklık puanı), `est_effort_clean` (Tahmini efor saati), `optimism_ratio_calc` (SP / Tahmini efor iyimserlik oranı), `priority_num` (Öncelik seviyesi), `env_num` (Hedef ortam kritikliliği).
-  - *PR & CI/CD Erken Sinyalleri (4 öznitelik):* `pr_total_changed_files` (Değişen dosya sayısı), `pr_total_ci_failures` (CI/CD pipeline kırılma sayısı), `pr_conflict_count` (Merge çakışması sayısı), `pr_max_review_iterations` (Kod inceleme döngü/tur sayısı).
-- **5 Model Performans Metriği Kartı:** Test veri seti üzerinde hesaplanan **ROC-AUC Skoru** (`~0.920`), **Doğruluk / Accuracy** (`~%84.9`), **F1-Skoru** (`~0.874`), **Kesinlik / Precision** (`~%88.6`) ve **Duyarlılık / Recall - Erken Yakalama Oranı** (`~%86.1`).
-- **🌐 Küresel XAI Öznitelik Önemi Grafiği (Global Feature Importance):** 13 erken sinyalin model kararındaki yüzde etki ağırlıklarını büyükten küçüğe sıralayan yatay bar grafiği.
-- **🧠 En Sık Karşılaşılan Nedensel XAI Risk Örüntüleri Tablosu:** Veri setinde gecikmeye en çok yol açan birincil XAI risk faktörü kombinasyonlarının (`xai_primary_risk_factors`) görev sayısı ve oran (%) tablosu.
-- **🎯 Doğrulama Karmaşıklık Matrisi (Confusion Matrix):** *Gerçek Zamanında (0) / Gerçek Gecikti (1)* ile *Tahmin Zamanında (0) / Tahmin Gecikecek (1)* dağılımını gösteren doğrulama tablosu.
+#### 🎛️ 3. What-If (Müdahale) Karar Simülatörü (`Sekme 3`)
+- **Hızlı Senaryo Butonları:** *"✨ Blocker & Engelleri Sıfırla"*, *"✂️ Görevi Küçült (5 SP & PR Küçült)"* ve *"🔧 Conflict & CI Hatalarını Çöz"* butonlarıyla tek tıkla müdahale testi.
+- **Canlı Sonuç Kartları & Reçete:** Sayfanın en üstünde *Yeni Bileşik Risk Skoru*, *Yeni Gecikme Olasılığı*, *Tahmini Gecikme Süresi* ve *Simülasyon Karar Reçetesi* anlık olarak güncellenir.
+- **3 Sütunlu Kontroller:** *1️⃣ Görev Kapsamı & Planlama*, *2️⃣ Süreç Engelleri (Darboğazlar)* ve *3️⃣ PR & CI/CD Kalitesi* kaydırıcıları.
 
----
+#### 🔀 4. PR & Ekip İş Yükü Analizi (`Sekme 4`)
+- **4 PR Özet Kartı:** Toplam PR, Merge Çakışması Oranı, Ortalama Birleştirme Süresi ve CI/CD Hata Oranı.
+- **⚔️ Merge Çakışmasının Süreye Etkisi & 🛡️ Güvenlik Taraması (SAST/CVE) Grafikleri.**
+- **👨‍💻 Geliştirici İş Yükü ve Risk Dağılımı Tablosu:** Ekip üyelerinin üzerindeki açık görev, yüksek riskli iş ve PR conflict yükünü karşılaştırır.
 
-#### 🔍 3. Tekil Görev/PR XAI Karar Müfettişi (`Sekme 3`)
-Seçilen veya ID ile aranan (`TASK-100001` vb.) tek bir görevin neden riskli olduğunu (**Local Explainability / SHAP-stili yerel katkı**) ve bağlı PR/CI-CD darboğazlarını uçtan uca inceleyen derinlemesine analiz ekranıdır:
-- **Akıllı Görev Seçici ve Arama Motoru:** Görevleri *En Yüksek Erken Risk Skoruna Göre*, *En Fazla Blocker & PR Çakışmasına Göre* veya *Görev Numarasına Göre* sıralayarak seçme ya da doğrudan Task ID yazarak bulma.
-- **Görev Kimlik & Risk Özet Kartı:** Görev başlığı, proje, yazılım bileşeni, sorumlu geliştirici, mevcut durum, öncelik rozeti, **Bileşik Erken Risk Skoru (`0-100`)** ve **Erken Gecikme Olasılığı (`%`)**.
-- **🧠 XAI Nedensel Risk Açıklaması Kutusu:** Görevin gecikme riskini tetikleyen birincil faktörleri ve yüzde katkılarını (`xai_primary_risk_factors`) vurgular.
-- **💡 Önerilen Karar Destek Aksiyonu Kutusu:** Gecikmeyi önlemek için yöneticiye/Scrum Master'a önerilen somut müdahale aksiyonunu (`xai_recommended_actions`) sunar.
-- **📊 Lokal XAI Faktör Katkı Analizi (SHAP-Stili Puan Dağılımı Grafiği):** Baz sistem karmaşıklığı (`+10 puan`) üzerine her bir faktörün (*Blocker, Bağımlılıklar, Scope Creep, Reopen, Story Points, İyimser Efor, Öncelik, Hedef Ortam, PR & CI/CD Darboğazı*) risk skorunu kaç puan artırdığını (**kırmızı `+` barlar**) veya azalttığını (**yeşil `-` barlar**) gösteren yerel açıklanabilirlik grafiği.
-- **📋 Görev Planlama, Kapsam ve Metin Detayları:** Sprint/Epic bilgisi, planlanan başlangıç ve teslim tarihleri, Story Points, tahmini vs. gerçekleşen efor, ön koşul görevler (`dependencies`), `data_quality_flag` ve yapısal olmayan (**Unstructured**) Türkçe **Görev Açıklaması (`description`)** ile **Kabul Kriterleri (`acceptance_criteria`)**.
-- **🔀 Bağlı Pull Request (PR) ve CI/CD Kayıtları (`1:N` İlişkisel Görünüm):** Göreve bağlı açılan tüm PR'ların detaylı kartları:
-  - Repo ve kaynak/hedef branch (`feature/... -> main`), PR yazarı ve reviewer listesi.
-  - Değişen dosya sayısı, eklenen/silinen kod satırı (`+lines / -lines`), commit sayısı.
-  - Merge Conflict durumu, Pipeline & Build durumu, CI hata sayısı, ilk inceleme süresi (`time_to_first_review_hours`) ve birleştirme süresi (`time_to_merge_hours`).
-  - **SonarQube Statik Kod Analizi**, **SAST/CVE Güvenlik Taraması**, **PR XAI Risk Nedeni**, **PR XAI Karar Önerisi**, gerçek **`git diff` kod yaması (`diff_code_changes`)** ve **Reviewer yorumları (`review_comments`)**.
+#### 🤖 5. Yapay Zeka (XAI) & Veri Kalitesi (`Sekme 5`)
+- **ML Model Performansı & Küresel XAI:** `RandomForestClassifier` modelinin **ROC-AUC**, **Accuracy**, **F1**, **Precision**, **Recall** skorları, **Küresel XAI Öznitelik Önemi Grafiği** ve **Confusion Matrix** özeti.
+- **🧹 5V Veracity & ⚡ 5V Velocity:** Task ve PR veri kalitesi (`data_quality_flag`) dağılım tabloları ve açılır panelde canlı olay akışı (`velocity_event_stream.jsonl`) kayıtları.
 
----
-
-#### 🎛️ 4. What-If (Karşı-Olgusal / Counterfactual) Karar Simülatörü (`Sekme 4`)
-Yöneticilerin veya takım liderlerinin bir görevin parametrelerine **erken müdahale ettiklerinde** teslimat riskinin ve tahmini gecikme süresinin nasıl değişeceğini canlı olarak test ettikleri karşı-olgusal (counterfactual) simülasyon laboratuvarıdır:
-- **1️⃣ Görev Kapsam & Planlama Kontrolleri:** *Karmaşıklık Puanı (`Story Points`: 1–21)*, *Tahmini Efor (`Saat`: 2–160)*, *Görev Önceliği (`Low`, `Medium`, `High`, `Critical`)* ve *Hedef Ortam (`Development`, `Test`, `Staging`, `Production`)* kaydırıcı ve seçicileri.
-- **2️⃣ Süreç Darboğazları & Bağımlılık Kontrolleri:** *Blocker Sayısı (`0–5`)*, *Ön Koşul Görev Bağımlılığı (`0–5`)*, *Scope Creep / Kapsam Değişimi (`0–5`)* ve *Testten Geri Dönüş / Reopen (`0–4`)* kaydırıcıları.
-- **3️⃣ PR & CI/CD Entegrasyon Kalitesi Kontrolleri:** *PR Değişen Dosya Sayısı (`1–50`)*, *PR Eklenen Kod Satırı (`10–2500`)*, *CI/CD Pipeline Kırılma Sayısı (`0–6`)* ve *PR Merge Çakışması (`Conflict Var/Yok`)* kontrolleri.
-- **Canlı Simülasyon Sonuç Kartları (Referans Görev ile Karşılaştırmalı Delta):**
-  1. **Simüle Edilen Bileşik Risk Skoru (`0-100`):** Görevin orijinal risk skoruna göre kaç puan düştüğünü/arttığını anlık gösterir.
-  2. **Simüle Edilen Gecikme Olasılığı (`%`):** Orijinal olasılığa kıyasla yüzdesel iyileşme deltası.
-  3. **Tahmini Gecikme Süresi (`Gün`):** Müdahale sonrası kaç iş günü kazanılacağını (`-X gün`) hesaplar.
-  4. **Simüle Edilen Yeni Risk Sınıfı:** `Critical` → `High` → `Medium` → `Low` sınıf geçişini gösterir.
-- **🩺 XAI Karşı-Olgusal (Counterfactual) Karar Reçetesi:** Seçilen parametrelere göre hangi müdahalenin (örn. *"Blocker kaldırılırsa risk -16 puan düşer"*, *"Görevi 5 SP'lik alt parçalara bölmek riski ~14 puan azaltır"*, *"PR dosya sayısını 10'un altına çekmek ve günlük rebase yapmak entegrasyon riskini -%35 iyileştirir"*) ne kadar kazanım sağlayacağını reçete halinde listeler.
-
----
-
-#### 🔀 5. PR, Kod İnceleme & CI/CD Analitiği (`Sekme 5`)
-Kod birleştirme, statik analiz, güvenlik taraması ve geliştirici iş yükü darboğazlarını inceleyen mühendislik analitiği modülüdür:
-- **4 PR & CI/CD Özet Metrik Kartı:**
-  1. *Toplam İncelenen PR Sayısı*
-  2. *Merge Çakışması (Conflict) Oranı (%)* ve çakışmalı PR adedi
-  3. *Ortalama Birleştirme Süresi (`time_to_merge_hours`)* ve *İlk İncelemeye Kadar Geçen Süre (`time_to_first_review_hours`)*
-  4. *CI/CD Pipeline Kırılma Oranı (%)* ve ortalama kod inceleme turu (`review_iteration_count`)
-- **⚔️ Merge Conflict Durumuna Göre PR Risk ve Birleştirme Süresi Grafiği:** Temiz PR'lar ile çakışmalı (`Merge Conflict`) PR'ların ortalama birleştirme sürelerini (saat) ve PR risk skorlarını karşılaştıran grafik.
-- **🛡️ Güvenlik Taraması (SAST/CVE) & SonarQube Kalite Kapısı Dağılımı:** PR'ların güvenlik taraması sonuçlarına (`Passed`, `Warning`, `Critical Vulnerability` vb.) ve risk sınıflarına göre dağılım grafiği.
-- **👨‍💻 Geliştirici / Sorumlu Bazlı Görev ve PR Risk Yükü Matrisi:** Her bir geliştiricinin (`assignee`) üzerindeki *Toplam Görev*, *Açık Görev*, *Kritik/Yüksek Riskli Görev Sayısı*, *Ortalama Erken Risk Skoru*, *Gecikme Oranı (%)* ve *Toplam PR Conflict Sayısı* değerlerini sıralayarak iş yükü dengesizliklerini ortaya koyan tablo.
-
----
-
-#### 🏛️ 6. Büyük Veri (5V), Veracity & Canlı Akış (`Sekme 6`)
-Büyük Veri mimarisinin **Veracity (Veri Doğruluğu / Kalitesi)** ve **Velocity (Gerçek Zamanlı Olay Akışı)** boyutlarını canlı olarak izleyen modüldür:
-- **🔍 4V - Veracity (Görev Veri Kalitesi & Kusur Dağılımı Tablosu):** Task veri setindeki `data_quality_flag` etiketlerinin (`Clean`, `Missing_Estimate`, `Outlier_Effort`, `Clock_Skew_Corrected` vb.) kayıt sayısı ve yüzdesel dağılımı.
-- **🔍 4V - Veracity (PR Veri Kalitesi & Kusur Dağılımı Tablosu):** PR veri setindeki `data_quality_flag` etiketlerinin (`Clean`, `Outlier_Diff_Size` vb.) kayıt sayısı ve yüzdesel dağılımı.
-- **⚡ 2V - Velocity: Gerçek Zamanlı CI/CD & PR Olay Akışı Radarı (`velocity_event_stream.jsonl`):**
-  - *3 Canlı Akış Metriği:* Okunan canlı akış olayı sayısı, anlık kritik risk sıçraması (`instant_risk_delta > +15 puan`) yaşanan olay sayısı ve ortalama anlık risk değişimi.
-  - *Streaming Event Radar Tablosu:* Akan olayları *Olay ID, Zaman Damgası, Olay Türü (`CI_PIPELINE_FAILED`, `MERGE_CONFLICT_DETECTED`, `SCOPE_CREEP_ADDED`, `BLOCKER_FLAGGED` vb.), Proje, Bileşen, Görev/PR ID, Geliştirici, Anlık Risk Deltası (`+puan`)* ve *XAI Akış Uyarısı* sütunlarıyla listeler.
-
----
-
-#### 📥 7. Aksiyon Planı & Rapor İndir (`Sekme 7`)
-Seçili filtrelere göre erken müdahale gerektiren yüksek riskli görevlerin ve XAI karar destek önerilerinin yönetim toplantıları, Sprint Planning veya Jira/DevOps entegrasyonlarında kullanılmak üzere dışa aktarıldığı modüldür:
-- **📊 CSV Rapor İndirme (`xai_erken_risk_karar_destek_raporu.csv`):** UTF-8 BOM (`utf-8-sig`) kodlamasıyla Excel ve BI araçlarıyla tam uyumlu tablo çıktısı.
-- **📄 JSON Rapor İndirme (`xai_erken_risk_karar_destek_raporu.json`):** Jira, GitHub Issues, GitLab veya kurumsal webhook/API entegrasyonları için yapılandırılmış JSON çıktısı.
-- **Önizleme Tablosu:** İndirilecek rapordaki en yüksek riskli görevlerin (*Görev ID, Başlık, Proje, Bileşen, Durum, Öncelik, Sorumlu, Hedef Teslim, Bileşik Erken Risk Skoru, Risk Sınıfı, Erken Gecikme Olasılığı, Blocker, PR Conflict, CI Hata, XAI Birincil Risk Faktörleri* ve *Önerilen Karar Destek Aksiyonu*) canlı önizlemesi.
+#### 📥 6. Aksiyon Planı & Rapor İndir (`Sekme 6`)
+- **🎯 Önerilen Müdahale Aksiyonlarına Göre Görev Özeti:** Hangi karar destek aksiyonunun kaç açık ve toplam görev için önerildiğini ve ortalama risk skorunu gruplayarak gösterir.
+- **📊 CSV ve 📄 JSON Rapor İndirme:** Seçili filtrelere göre en yüksek riskli görevlerin ve XAI aksiyon önerilerinin tam listesini yönetim toplantıları veya Jira/DevOps entegrasyonu için dışa aktarır ve ilk 50 kaydın önizlemesini sunar.
 
 ---
 
@@ -268,8 +217,8 @@ Seçili filtrelere göre erken müdahale gerektiren yüksek riskli görevlerin v
 Proje, hem yerel **Streamlit (`dashboard.py`)** hem de **Vercel Serverless + Web (`public/` + `api/index.py`)** mimarisiyle %100 uyumlu olacak şekilde yapılandırılmıştır:
 
 - [`vercel.json`](file:///c:/karışık/bigdata_/vercel.json): `/api/*` isteklerini Python FastAPI sunucusuna ([`api/index.py`](file:///c:/karışık/bigdata_/api/index.py)), ana arayüzü ise [`public/index.html`](file:///c:/karışık/bigdata_/public/index.html) ve [`public/app.js`](file:///c:/karışık/bigdata_/public/app.js) dosyalarına yönlendirir.
-- **Büyük Dosya Yükleme Desteği (Client-Side Parquet / CSV / JSONL Motoru):** Vercel Serverless fonksiyonlarının 4.5 MB payload limitine takılmadan, tarayıcı üzerinde doğrudan `.parquet` (`hyparquet`), `.csv` (`PapaParse`) ve `.jsonl` formatlarında yüz binlerce satırlık **Task ve PR** dosyalarını yükleyip analiz edebilirsiniz.
-- **Hazır Örneklem (`public/sample_data.json`):** 1 GB'lık yerel `data/` klasörü [`.vercelignore`](file:///c:/karışık/bigdata_/.vercelignore) ve [`.gitignore`](file:///c:/karışık/bigdata_/.gitignore) ile hariç tutulmuş, Vercel üzerinde açılır açılmaz çalışması için `public/sample_data.json` (500 Task + 938 PR + 120 canlı akış olayı) eklenmiştir.
+- **Varsayılan `data/` Veri Seti Desteği:** Sistem hem Streamlit (`dashboard.py`) hem de Web (`public/app.js`) arayüzünde varsayılan olarak doğrudan `data/` klasöründeki gerçek veri setlerini (`data/tasks_dataset.parquet` — **80.000 Görev**, `data/pull_requests_dataset.parquet` — **151.105 PR** ve `data/velocity_event_stream.jsonl` — **10.000 akış olayı**) yükler.
+- **Büyük Dosya Yükleme Desteği (Client-Side Parquet / CSV / JSONL Motoru):** Tarayıcı üzerinde doğrudan `.parquet` (`hyparquet`), `.csv` (`PapaParse`) ve `.jsonl` formatlarında yüz binlerce satırlık **Task ve PR** dosyalarını yükleyip analiz edebilirsiniz.
 
 ### Vercel'e Yükleme Adımları:
 1. Projeyi GitHub deponuza gönderin (`git add . && git commit -m "Vercel XAI Dashboard" && git push`) ve [vercel.com/new](https://vercel.com/new) üzerinden depoyu içe aktarıp **Deploy** butonuna basın.
