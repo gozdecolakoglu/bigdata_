@@ -88,9 +88,38 @@ const PR_PARQUET_COLUMNS = [
 // ---------------------------------------------------------------------------
 // 1. DOSYA VE PARQUET / CSV / JSONL OKUMA MOTORU
 // ---------------------------------------------------------------------------
+let hyparquetCompressors = null;
+
 async function getHyparquet() {
+    if (hyparquetModule) return hyparquetModule;
+    const cdnUrls = [
+        "https://cdn.jsdelivr.net/npm/hyparquet@1.11.2/+esm",
+        "https://esm.sh/hyparquet@1.11.2",
+        "https://unpkg.com/hyparquet@1.11.2/src/index.js",
+    ];
+    for (const url of cdnUrls) {
+        try {
+            hyparquetModule = await import(url);
+            if (hyparquetModule) break;
+        } catch (_) {}
+    }
     if (!hyparquetModule) {
-        hyparquetModule = await import("https://cdn.jsdelivr.net/npm/hyparquet@1.11.2/+esm");
+        throw new Error("Parquet okuma modülü (hyparquet) yüklenemedi. Lütfen internet bağlantınızı kontrol edin veya CSV / JSON formatında dosya yükleyin.");
+    }
+    if (!hyparquetCompressors) {
+        const compUrls = [
+            "https://cdn.jsdelivr.net/npm/hyparquet-compressors@0.5.0/+esm",
+            "https://esm.sh/hyparquet-compressors@0.5.0",
+        ];
+        for (const url of compUrls) {
+            try {
+                const compMod = await import(url);
+                if (compMod && compMod.compressors) {
+                    hyparquetCompressors = compMod.compressors;
+                    break;
+                }
+            } catch (_) {}
+        }
     }
     return hyparquetModule;
 }
@@ -112,7 +141,7 @@ async function parseParquetArrayBuffer(arrayBuffer, preferredColumns = null) {
     }
 
     const rows = [];
-    await hyparquet.parquetRead({
+    const readOptions = {
         file: arrayBuffer,
         columns: selectedColumns,
         rowFormat: "object",
@@ -121,7 +150,11 @@ async function parseParquetArrayBuffer(arrayBuffer, preferredColumns = null) {
                 rows.push(data[i]);
             }
         },
-    });
+    };
+    if (hyparquetCompressors) {
+        readOptions.compressors = hyparquetCompressors;
+    }
+    await hyparquet.parquetRead(readOptions);
     return rows;
 }
 
@@ -1333,13 +1366,26 @@ function switchTab(tabId) {
     }
 }
 
+async function fetchFirstValid(candidates, options = {}) {
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url, options);
+            if (res.ok) return { res, url };
+        } catch (_) {}
+    }
+    return null;
+}
+
 async function fetchStreamEventsFromDataDir() {
     try {
-        const res = await fetch("/data/velocity_event_stream.jsonl", {
-            headers: { Range: "bytes=0-262143" },
-        });
-        if (!res.ok) return [];
-        const text = await res.text();
+        const result = await fetchFirstValid([
+            "data/velocity_event_stream.jsonl",
+            "./data/velocity_event_stream.jsonl",
+            "/data/velocity_event_stream.jsonl",
+            "/public/data/velocity_event_stream.jsonl",
+        ], { headers: { Range: "bytes=0-262143" } });
+        if (!result) return [];
+        const text = await result.res.text();
         return parseJsonlText(text, 200);
     } catch (_) {
         return [];
@@ -1351,22 +1397,66 @@ async function loadDefaultDataFromDataDir() {
     badge.classList.remove("hidden");
     badge.classList.add("flex");
     try {
-        const [taskRes, prRes, loadedStream] = await Promise.all([
-            fetch("/data/tasks_dataset.parquet"),
-            fetch("/data/pull_requests_dataset.parquet"),
+        // 1. Önce anında açılan hazır varsayılan veri setini (default_dataset.json / sample_data.json) dene
+        const jsonResult = await fetchFirstValid([
+            "data/default_dataset.json",
+            "./data/default_dataset.json",
+            "/data/default_dataset.json",
+            "/public/data/default_dataset.json",
+            "sample_data.json",
+            "./sample_data.json",
+            "/sample_data.json",
+            "data/sample_data.json",
+            "./data/sample_data.json",
+        ]);
+
+        if (jsonResult) {
+            const data = await jsonResult.res.json();
+            rawTasks = data.tasks || [];
+            rawPrs = data.prs || [];
+            streamEvents = (data.stream && data.stream.length > 0) ? data.stream : (await fetchStreamEventsFromDataDir());
+            dataDirty = true;
+
+            const fullNote = data.full_volume ? " (80.000 Görev • 151.105 PR Evreni)" : "";
+            taskSourceLabel = `data/tasks_dataset.parquet (${rawTasks.length.toLocaleString()} Görev Aktif${fullNote})`;
+            prSourceLabel = `data/pull_requests_dataset.parquet (${rawPrs.length.toLocaleString()} PR Aktif)`;
+            document.getElementById("taskUploadStatus").textContent = `✅ ${taskSourceLabel}`;
+            document.getElementById("prUploadStatus").textContent = `✅ ${prSourceLabel}`;
+            const banner = document.getElementById("activeSourceBanner");
+            if (banner) {
+                banner.textContent = `✅ Projedeki varsayılan veri seti devrede (${rawTasks.length.toLocaleString()} Görev, ${rawPrs.length.toLocaleString()} PR).`;
+            }
+            applyFiltersAndRender();
+            return;
+        }
+
+        // 2. JSON bulunamazsa doğrudan Parquet dosyalarını oku (hyparquet + compressors)
+        const [taskCandidate, prCandidate, loadedStream] = await Promise.all([
+            fetchFirstValid([
+                "data/tasks_dataset.parquet",
+                "./data/tasks_dataset.parquet",
+                "/data/tasks_dataset.parquet",
+                "/public/data/tasks_dataset.parquet",
+            ]),
+            fetchFirstValid([
+                "data/pull_requests_dataset.parquet",
+                "./data/pull_requests_dataset.parquet",
+                "/data/pull_requests_dataset.parquet",
+                "/public/data/pull_requests_dataset.parquet",
+            ]),
             fetchStreamEventsFromDataDir(),
         ]);
 
-        if (!taskRes.ok) {
-            throw new Error(`data/tasks_dataset.parquet okunamadı (HTTP ${taskRes.status})`);
+        if (!taskCandidate) {
+            throw new Error("data/tasks_dataset.parquet dosyasına erişilemedi.");
         }
-        if (!prRes.ok) {
-            throw new Error(`data/pull_requests_dataset.parquet okunamadı (HTTP ${prRes.status})`);
+        if (!prCandidate) {
+            throw new Error("data/pull_requests_dataset.parquet dosyasına erişilemedi.");
         }
 
         const [taskBuf, prBuf] = await Promise.all([
-            taskRes.arrayBuffer(),
-            prRes.arrayBuffer(),
+            taskCandidate.res.arrayBuffer(),
+            prCandidate.res.arrayBuffer(),
         ]);
 
         const [parsedTasks, parsedPrs] = await Promise.all([
@@ -1386,8 +1476,10 @@ async function loadDefaultDataFromDataDir() {
         applyFiltersAndRender();
     } catch (err) {
         console.error("data/ klasöründeki varsayılan veri setleri yüklenemedi:", err);
-        document.getElementById("activeSourceBanner").textContent =
-            "Varsayılan data/ dosyaları yüklenirken hata oluştu: " + err.message;
+        const banner = document.getElementById("activeSourceBanner");
+        if (banner) {
+            banner.textContent = "Varsayılan data/ dosyaları yüklenirken hata oluştu: " + err.message;
+        }
     } finally {
         badge.classList.add("hidden");
         badge.classList.remove("flex");

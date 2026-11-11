@@ -350,7 +350,31 @@ def ensure_pr_risk_and_xai_columns(df_prs: pd.DataFrame) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def load_default_datasets(data_dir: str = "data") -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], dict]:
     tasks_df, prs_df, meta = None, None, {}
-    meta_path = os.path.join(data_dir, "dataset_metadata_5v.json")
+
+    # Olası tüm veri dizini konumlarını tara
+    candidate_dirs = [
+        data_dir,
+        os.path.join(BASE_DIR, "data"),
+        os.path.join(BASE_DIR, "public", "data"),
+        os.path.join(os.getcwd(), "data"),
+        os.path.join(os.getcwd(), "public", "data"),
+        "data",
+        "public/data",
+    ]
+    resolved_dir = None
+    for d in candidate_dirs:
+        if d and os.path.isdir(d):
+            if any(
+                os.path.exists(os.path.join(d, f))
+                for f in ["tasks_dataset.parquet", "tasks_dataset.csv", "tasks_dataset.jsonl", "default_dataset.json"]
+            ):
+                resolved_dir = d
+                break
+
+    if not resolved_dir:
+        resolved_dir = data_dir
+
+    meta_path = os.path.join(resolved_dir, "dataset_metadata_5v.json")
     if os.path.exists(meta_path):
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
@@ -359,26 +383,46 @@ def load_default_datasets(data_dir: str = "data") -> Tuple[Optional[pd.DataFrame
             meta = {}
 
     for candidate in ["tasks_dataset.parquet", "tasks_dataset.csv", "tasks_dataset.jsonl"]:
-        p = os.path.join(data_dir, candidate)
+        p = os.path.join(resolved_dir, candidate)
         if os.path.exists(p):
-            tasks_df = ensure_task_risk_and_xai_columns(parse_uploaded_or_path(p))
-            break
+            try:
+                tasks_df = ensure_task_risk_and_xai_columns(parse_uploaded_or_path(p))
+                break
+            except Exception:
+                continue
 
     for candidate in ["pull_requests_dataset.parquet", "pull_requests_dataset.csv", "pull_requests_dataset.jsonl"]:
-        p = os.path.join(data_dir, candidate)
+        p = os.path.join(resolved_dir, candidate)
         if os.path.exists(p):
-            prs_df = ensure_pr_risk_and_xai_columns(parse_uploaded_or_path(p))
-            break
+            try:
+                prs_df = ensure_pr_risk_and_xai_columns(parse_uploaded_or_path(p))
+                break
+            except Exception:
+                continue
 
     return tasks_df, prs_df, meta
 
 
 @st.cache_data(show_spinner=False)
 def load_velocity_stream(stream_path: str = "data/velocity_event_stream.jsonl", limit: Optional[int] = None) -> pd.DataFrame:
-    if not os.path.exists(stream_path):
+    candidate_paths = [
+        stream_path,
+        os.path.join(BASE_DIR, stream_path),
+        os.path.join(BASE_DIR, "data", "velocity_event_stream.jsonl"),
+        os.path.join(BASE_DIR, "public", "data", "velocity_event_stream.jsonl"),
+        os.path.join(os.getcwd(), "data", "velocity_event_stream.jsonl"),
+    ]
+    resolved_path = None
+    for cp in candidate_paths:
+        if os.path.exists(cp):
+            resolved_path = cp
+            break
+
+    if not resolved_path:
         return pd.DataFrame()
+
     records = []
-    with open(stream_path, "r", encoding="utf-8") as f:
+    with open(resolved_path, "r", encoding="utf-8") as f:
         for idx, line in enumerate(f):
             if limit is not None and idx >= limit:
                 break
@@ -600,7 +644,8 @@ def main():
     st.sidebar.caption("Karar Destek ve Filtreleme Merkezi")
 
     # Daraltılabilir Veri Seti Yükleme Kutusu (Kalabalık yapmaz)
-    with st.sidebar.expander("📂 Başka Veri Seti Yükle", expanded=False):
+    with st.sidebar.expander("📂 Başka Veri Seti Yükle (İsteğe Bağlı)", expanded=False):
+        st.caption("Projedeki varsayılan veri seti otomatik yüklenmiştir. Farklı bir veri seti incelemek isterseniz buradan yükleyebilirsiniz.")
         uploaded_task_file = st.file_uploader(
             "📋 Görev (Task) Dosyası",
             type=["parquet", "csv", "jsonl", "json"],
@@ -632,6 +677,12 @@ def main():
     if df_tasks is None or len(df_tasks) == 0:
         st.info("👋 Analizi başlatmak için sol menüdeki **'📂 Başka Veri Seti Yükle'** bölümünden veri dosyalarınızı seçin.")
         return
+
+    # Kullanıcıya veri setinin varsayılan olarak devrede olduğunu bildiren rozet
+    if uploaded_task_file is None and uploaded_pr_file is None:
+        st.sidebar.success(f"✅ Varsayılan Proje Verisi Aktif\n\n({len(df_tasks):,} Görev • {len(df_prs) if df_prs is not None else 0:,} PR)")
+    else:
+        st.sidebar.info(f"📂 Özel Yüklenen Veri Aktif\n\n({len(df_tasks):,} Görev • {len(df_prs) if df_prs is not None else 0:,} PR)")
 
     # ---------------------------------------------------------------------------
     # SOL MENÜ: SADE AÇILIR LİSTE (SELECTBOX) FİLTRELER
