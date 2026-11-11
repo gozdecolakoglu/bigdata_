@@ -1630,8 +1630,10 @@ function bindEvents() {
         document.getElementById(id).addEventListener("change", runWhatIfSimulation);
     });
 
-    document.getElementById("downloadCsvBtn").addEventListener("click", exportCsvReport);
-    document.getElementById("downloadJsonBtn").addEventListener("click", exportJsonReport);
+    const downloadCsvBtn = document.getElementById("downloadCsvBtn");
+    if (downloadCsvBtn) downloadCsvBtn.addEventListener("click", exportCsvReport);
+    const downloadJsonBtn = document.getElementById("downloadJsonBtn");
+    if (downloadJsonBtn) downloadJsonBtn.addEventListener("click", exportJsonReport);
     const tabCsvBtn = document.getElementById("tabDownloadCsvBtn");
     if (tabCsvBtn) tabCsvBtn.addEventListener("click", exportCsvReport);
     const tabJsonBtn = document.getElementById("tabDownloadJsonBtn");
