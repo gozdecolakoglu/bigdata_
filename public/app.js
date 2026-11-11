@@ -1440,7 +1440,10 @@ async function loadDefaultDataFromDataDir() {
         ]);
 
         if (jsonResult) {
-            const data = await jsonResult.res.json();
+            const rawText = await jsonResult.res.text();
+            // Standart dışı NaN ve Infinity değerlerini güvenle null'a dönüştür
+            const safeText = rawText.replace(/:\s*NaN\b/g, ": null").replace(/:\s*-?Infinity\b/g, ": null");
+            const data = JSON.parse(safeText);
             window.__GLOBAL_METRICS__ = data.global_metrics || null;
             rawTasks = data.tasks || [];
             rawPrs = data.prs || [];
