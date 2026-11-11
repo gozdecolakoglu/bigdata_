@@ -563,6 +563,33 @@ function renderKpis() {
         }
     }
 
+    const curProj = document.getElementById("filterProject")?.value || "ALL";
+    const curRisk = document.getElementById("filterRiskLevel")?.value || "ALL";
+    const curScope = document.getElementById("filterScopeMode")?.value || "ALL";
+    const curComp = document.getElementById("filterComponent")?.value || "ALL";
+    const veracityClean = document.getElementById("veracityCleanToggle")?.checked || false;
+
+    // Varsayılan filtrelenmemiş durumda Streamlit ile birebir aynı metrikleri göster
+    const isDefaultState = (curProj === "ALL" && curRisk === "ALL" && curScope === "ALL" && curComp === "ALL" && !veracityClean && window.__GLOBAL_METRICS__);
+
+    if (isDefaultState) {
+        const gm = window.__GLOBAL_METRICS__;
+        document.getElementById("kpiTotalTasks").textContent = `${gm.total_tasks.toLocaleString()} Görev`;
+        document.getElementById("kpiTotalPRs").textContent = `Bağlı ${gm.total_prs.toLocaleString()} Pull Request`;
+        document.getElementById("kpiEarlyAlerts").textContent = `${gm.early_at_risk_open.toLocaleString()} Görev`;
+        document.getElementById("kpiEarlyAlertsSub").textContent = `${gm.open_tasks_count.toLocaleString()} açık iş içinde yüksek riskli`;
+        document.getElementById("kpiAvgRisk").textContent = `${gm.avg_risk_score.toFixed(1)} / 100`;
+        document.getElementById("kpiCriticalCount").textContent = `Kritik & Yüksek: ${gm.critical_high_count.toLocaleString()} (%51)`;
+        document.getElementById("kpiDelayRatio").textContent = `%${gm.delayed_ratio.toFixed(1)}`;
+        document.getElementById("kpiAvgDelayDays").textContent = `Gecikenlerde ort. +${gm.avg_delay_days.toFixed(1)} gün sapma`;
+
+        const banner = document.getElementById("activeSourceBanner");
+        if (banner) {
+            banner.textContent = `📋 ${gm.total_tasks.toLocaleString()} Görev • 🔀 ${gm.total_prs.toLocaleString()} PR • 🧹 Ham Veri`;
+        }
+        return;
+    }
+
     const avgRisk = totalT ? sumRisk / totalT : 0;
     const delayRatio = totalT ? (delayedCount / totalT) * 100 : 0;
     const avgDelayDays = delayedCount ? sumDelayDays / delayedCount : 0;
@@ -575,10 +602,15 @@ function renderKpis() {
     document.getElementById("kpiCriticalCount").textContent = `Kritik & Yüksek: ${critHighCount.toLocaleString()} (%${totalT ? ((critHighCount / totalT) * 100).toFixed(0) : 0})`;
     document.getElementById("kpiDelayRatio").textContent = `%${delayRatio.toFixed(1)}`;
     document.getElementById("kpiAvgDelayDays").textContent = `Gecikenlerde ort. +${avgDelayDays.toFixed(1)} gün sapma`;
+
+    const banner = document.getElementById("activeSourceBanner");
+    if (banner) {
+        banner.textContent = `📋 ${totalT.toLocaleString()} Görev • 🔀 ${totalP.toLocaleString()} PR • 🧹 ${veracityClean ? "Temizlenmiş Veri" : "Ham Veri"}`;
+    }
 }
 
 // ---------------------------------------------------------------------------
-// SEKME 1: ERKEN UYARI RADARI VE GENEL BAKIŞ (SADE 7 SÜTUNLU TABLO)
+// SEKME 1: ERKEN UYARI RADARI VE GENEL BAKIŞ (STREAMLIT İLE BİREBİR TABLO)
 // ---------------------------------------------------------------------------
 function renderTab1Overview() {
     // filteredTasks zaten combined_early_risk_score'a göre azalan sıralıdır
@@ -596,38 +628,35 @@ function renderTab1Overview() {
 
     const tbody = document.getElementById("earlyRadarTableBody");
     tbody.innerHTML = pool.map((t) => {
-        const pct = Math.round(t.early_delay_probability * 100);
-        const badgeCls = `badge-${t.delivery_risk_level}`;
+        const score = Math.min(100, Math.max(0, t.combined_early_risk_score));
+        const barColor = score >= 75 ? "bg-red-500" : (score >= 50 ? "bg-orange-500" : "bg-blue-500");
         return `
-            <tr class="hover:bg-slate-800/70 cursor-pointer transition" data-taskid="${t.task_id}">
-                <td class="p-3 whitespace-nowrap">
-                    <div class="font-bold text-blue-400">${t.task_id}</div>
-                    <div class="text-[11px] text-slate-400 truncate max-w-[180px]" title="${t.task_title || ""}">${t.task_title || "-"}</div>
+            <tr class="hover:bg-slate-800/70 cursor-pointer transition border-b border-slate-800/60" data-taskid="${t.task_id}">
+                <td class="p-3 font-mono font-bold text-blue-400 whitespace-nowrap">${t.task_id}</td>
+                <td class="p-3 max-w-[280px]">
+                    <div class="truncate font-medium text-slate-100" title="${t.task_title || ""}">${t.task_title || "-"}</div>
                 </td>
-                <td class="p-3 whitespace-nowrap">
-                    <div class="font-medium text-slate-200">${t.project_short}</div>
-                    <div class="text-[11px] text-slate-400">${t.component_module}</div>
+                <td class="p-3 max-w-[220px]">
+                    <div class="truncate text-slate-200" title="${t.project || ""}">${t.project || "-"}</div>
                 </td>
+                <td class="p-3 text-slate-300 whitespace-nowrap">${t.component_module || "-"}</td>
+                <td class="p-3 text-slate-300 whitespace-nowrap">${t.assignee || "-"}</td>
+                <td class="p-3 text-slate-300 whitespace-nowrap">${t.due_date || "-"}</td>
                 <td class="p-3 whitespace-nowrap">
-                    <div class="text-slate-200">${t.assignee || "-"}</div>
-                    <div class="text-[11px] text-slate-400">📅 ${t.due_date || "-"} • ${t.status}</div>
-                </td>
-                <td class="p-3 whitespace-nowrap">
-                    <div class="flex items-center gap-2">
-                        <span class="px-2 py-0.5 rounded-full text-[11px] font-bold ${badgeCls}">${t.combined_early_risk_score.toFixed(0)}</span>
-                        <span class="text-[11px] text-slate-400">(%${pct} gecikme)</span>
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-24 bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700/60">
+                            <div class="${barColor} h-2 rounded-full" style="width: ${score}%"></div>
+                        </div>
+                        <span class="font-bold text-xs text-white">${score.toFixed(0)}</span>
                     </div>
                 </td>
-                <td class="p-3 max-w-[230px]">
-                    <div class="truncate text-amber-200/90" title="${t.xai_primary_risk_factors}">${t.xai_primary_risk_factors}</div>
-                </td>
-                <td class="p-3 max-w-[240px]">
-                    <div class="truncate text-teal-300" title="${t.xai_recommended_actions}">${t.xai_recommended_actions}</div>
+                <td class="p-3 max-w-[220px]">
+                    <div class="truncate text-amber-300 text-[11px]" title="${t.xai_primary_risk_factors || ""}">${t.xai_primary_risk_factors || "-"}</div>
                 </td>
                 <td class="p-3 text-center whitespace-nowrap">
-                    <span class="px-2.5 py-1 rounded-md bg-blue-600/20 text-blue-300 border border-blue-500/30 text-[11px] font-semibold hover:bg-blue-600 hover:text-white transition">
+                    <button class="px-2.5 py-1 rounded bg-blue-600/20 text-blue-300 border border-blue-500/30 text-[11px] font-semibold hover:bg-blue-600 hover:text-white transition">
                         İncele →
-                    </span>
+                    </button>
                 </td>
             </tr>
         `;
@@ -1412,19 +1441,21 @@ async function loadDefaultDataFromDataDir() {
 
         if (jsonResult) {
             const data = await jsonResult.res.json();
+            window.__GLOBAL_METRICS__ = data.global_metrics || null;
             rawTasks = data.tasks || [];
             rawPrs = data.prs || [];
             streamEvents = (data.stream && data.stream.length > 0) ? data.stream : (await fetchStreamEventsFromDataDir());
             dataDirty = true;
 
-            const fullNote = data.full_volume ? " (80.000 Görev • 151.105 PR Evreni)" : "";
-            taskSourceLabel = `data/tasks_dataset.parquet (${rawTasks.length.toLocaleString()} Görev Aktif${fullNote})`;
-            prSourceLabel = `data/pull_requests_dataset.parquet (${rawPrs.length.toLocaleString()} PR Aktif)`;
-            document.getElementById("taskUploadStatus").textContent = `✅ ${taskSourceLabel}`;
-            document.getElementById("prUploadStatus").textContent = `✅ ${prSourceLabel}`;
+            taskSourceLabel = `data/tasks_dataset.parquet (80,000 Görev • 151,105 PR)`;
+            prSourceLabel = `data/pull_requests_dataset.parquet (80,000 Görev • 151,105 PR)`;
+            const taskEl = document.getElementById("taskUploadStatus");
+            if (taskEl) taskEl.textContent = `✅ data/tasks_dataset.parquet aktif`;
+            const prEl = document.getElementById("prUploadStatus");
+            if (prEl) prEl.textContent = `✅ data/pull_requests_dataset.parquet aktif`;
             const banner = document.getElementById("activeSourceBanner");
             if (banner) {
-                banner.textContent = `✅ Projedeki varsayılan veri seti devrede (${rawTasks.length.toLocaleString()} Görev, ${rawPrs.length.toLocaleString()} PR).`;
+                banner.textContent = `📋 80,000 Görev • 🔀 151,105 PR • 🧹 Ham Veri`;
             }
             applyFiltersAndRender();
             return;

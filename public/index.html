@@ -44,32 +44,71 @@
     <!-- SOL KENAR ÇUBUĞU (SIDEBAR): SADELEŞTİRİLMİŞ FİLTRE & VERİ MERKEZİ -->
     <!-- =================================================================== -->
     <aside class="w-full lg:w-72 bg-slate-900/95 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 flex-shrink-0 flex flex-col justify-between lg:max-h-screen lg:sticky lg:top-0 overflow-y-auto">
-        <div class="space-y-5">
-            <!-- Logo & Başlık -->
+        <div class="space-y-4">
+            <!-- Logo & Başlık (Streamlit ile birebir) -->
             <div class="flex items-center gap-3 pb-3 border-b border-slate-800">
                 <div class="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-lg">
                     🛡️
                 </div>
                 <div>
-                    <h2 class="font-bold text-slate-100 text-sm leading-tight">Erken Risk & XAI</h2>
-                    <p class="text-[11px] text-slate-400">Karar Destek Sistemi</p>
+                    <h2 class="font-bold text-slate-100 text-sm leading-tight">Erken Risk & XAI Paneli</h2>
+                    <p class="text-[11px] text-slate-400">Karar Destek ve Filtreleme Merkezi</p>
                 </div>
             </div>
 
-            <!-- Hızlı Filtreler -->
-            <div class="space-y-3">
+            <!-- Daraltılabilir Veri Yükleme Kutusu (Streamlit'teki gibi başta ve kapalı) -->
+            <details class="pt-1 group">
+                <summary class="flex items-center justify-between cursor-pointer text-xs font-semibold text-slate-300 hover:text-white py-1.5 list-none bg-slate-800/40 px-2.5 rounded-lg border border-slate-800">
+                    <span>📂 Başka Veri Seti Yükle (İsteğe Bağlı)</span>
+                    <span class="text-slate-500 group-open:rotate-180 transition-transform">▼</span>
+                </summary>
+                <div class="mt-2.5 space-y-2.5 p-2 bg-slate-900/60 rounded-lg border border-slate-800">
+                    <p class="text-[10px] text-slate-400">Projedeki varsayılan veri seti otomatik yüklenmiştir. Farklı bir dosya incelemek isterseniz buradan yükleyebilirsiniz.</p>
+                    <div class="bg-slate-800/60 border border-dashed border-slate-600 rounded-lg p-2">
+                        <label class="block text-[11px] font-medium text-slate-300 mb-1">📋 Görev (Task) Dosyası</label>
+                        <input id="taskFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
+                            class="block w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
+                        <div id="taskUploadStatus" class="text-[10px] text-emerald-400 mt-1 truncate">data/tasks_dataset.parquet aktif</div>
+                    </div>
+
+                    <div class="bg-slate-800/60 border border-dashed border-slate-600 rounded-lg p-2">
+                        <label class="block text-[11px] font-medium text-slate-300 mb-1">🔀 Pull Request (PR) Dosyası</label>
+                        <input id="prFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
+                            class="block w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
+                        <div id="prUploadStatus" class="text-[10px] text-emerald-400 mt-1 truncate">data/pull_requests_dataset.parquet aktif</div>
+                    </div>
+
+                    <button id="resetSampleBtn" class="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 border border-slate-700 transition">
+                        🔄 Varsayılan Veri Setine Dön (data/)
+                    </button>
+                </div>
+            </details>
+
+            <!-- Hızlı Filtreler (Streamlit düzeni) -->
+            <div class="space-y-3 pt-2 border-t border-slate-800/80">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-[11px] font-bold uppercase tracking-wider text-slate-400">🔍 Filtreler</h3>
+                    <h3 class="text-xs font-bold text-slate-200">🔍 Hızlı Filtreler</h3>
                     <button id="clearFiltersBtn" class="text-[11px] text-blue-400 hover:text-blue-300 transition">Sıfırla</button>
                 </div>
 
                 <div>
                     <label class="block text-xs text-slate-300 mb-1">Görev Durumu</label>
                     <select id="filterScopeMode" class="w-full bg-slate-800/90 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
-                        <option value="ACTIVE">⚡ Sadece Açık Görevler (Erken Uyarı)</option>
                         <option value="ALL" selected>📋 Tüm Görevler (Açık + Tamamlanan)</option>
+                        <option value="ACTIVE">⚡ Sadece Açık Görevler (Erken Uyarı)</option>
                         <option value="DONE">✅ Sadece Tamamlanan Görevler</option>
                     </select>
+                </div>
+
+                <!-- Veri Kalitesi / Ön İşleme (Veracity) -->
+                <div>
+                    <label class="flex items-start gap-2.5 cursor-pointer bg-slate-800/50 hover:bg-slate-800/80 p-2 rounded-lg border border-slate-700/70 transition">
+                        <input id="veracityCleanToggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-blue-600 rounded" />
+                        <div>
+                            <span class="block text-xs font-medium text-slate-200">🧹 Otomatik Veri Temizleme (Veracity)</span>
+                            <span class="block text-[10px] text-slate-400 mt-0.5">Eksik efor tahminlerini doldurur ve aykırı değerleri düzeltir.</span>
+                        </div>
+                    </label>
                 </div>
 
                 <div>
@@ -97,57 +136,14 @@
                     </select>
                 </div>
             </div>
-
-            <!-- Veri Kalitesi / Ön İşleme -->
-            <div class="pt-3 border-t border-slate-800/80">
-                <label class="flex items-start gap-2.5 cursor-pointer bg-slate-800/50 hover:bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/70 transition">
-                    <input id="veracityCleanToggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-blue-600 rounded" />
-                    <div>
-                        <span class="block text-xs font-medium text-slate-200">🧹 Otomatik Veri Temizleme</span>
-                        <span class="block text-[11px] text-slate-400 mt-0.5">Eksik efor tahminlerini doldurur ve aykırı değerleri düzeltir.</span>
-                    </div>
-                </label>
-            </div>
-
-            <!-- Daraltılabilir Veri Yükleme Kutusu (Varsayılan kapalı, kalabalık yapmaz) -->
-            <details class="pt-3 border-t border-slate-800/80 group">
-                <summary class="flex items-center justify-between cursor-pointer text-xs font-semibold text-slate-300 hover:text-white py-1 list-none">
-                    <span>📂 Başka Veri Seti Yükle</span>
-                    <span class="text-slate-500 group-open:rotate-180 transition-transform">▼</span>
-                </summary>
-                <div class="mt-3 space-y-2.5">
-                    <div class="bg-slate-800/60 border border-dashed border-slate-600 rounded-lg p-2.5">
-                        <label class="block text-[11px] font-medium text-slate-300 mb-1">📋 Görev (Task) Dosyası</label>
-                        <input id="taskFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
-                            class="block w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
-                        <div id="taskUploadStatus" class="text-[10px] text-emerald-400 mt-1 truncate">data/tasks_dataset.parquet aktif</div>
-                    </div>
-
-                    <div class="bg-slate-800/60 border border-dashed border-slate-600 rounded-lg p-2.5">
-                        <label class="block text-[11px] font-medium text-slate-300 mb-1">🔀 Pull Request (PR) Dosyası</label>
-                        <input id="prFileInput" type="file" accept=".parquet,.csv,.jsonl,.json"
-                            class="block w-full text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer" />
-                        <div id="prUploadStatus" class="text-[10px] text-emerald-400 mt-1 truncate">data/pull_requests_dataset.parquet aktif</div>
-                    </div>
-
-                    <button id="resetSampleBtn" class="w-full py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 border border-slate-700 transition">
-                        🔄 Varsayılan Veri Setine Dön (data/)
-                    </button>
-                </div>
-            </details>
         </div>
 
-        <!-- Alt Bilgi & Hızlı İndirme -->
+        <!-- Alt Bilgi & Hızlı İndirme (Streamlit tarzı tam genişlik buton) -->
         <div class="pt-4 mt-4 border-t border-slate-800 space-y-2">
-            <div class="text-[11px] font-semibold text-slate-400">📥 Hızlı Rapor Dışa Aktar</div>
-            <div class="grid grid-cols-2 gap-2">
-                <button id="downloadCsvBtn" class="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-medium transition">
-                    📊 CSV İndir
-                </button>
-                <button id="downloadJsonBtn" class="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-medium transition">
-                    📄 JSON İndir
-                </button>
-            </div>
+            <div class="text-xs font-semibold text-slate-300">📥 Hızlı Rapor İndir</div>
+            <button id="downloadCsvBtn" class="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1.5">
+                📊 CSV Raporu İndir
+            </button>
         </div>
     </aside>
 
@@ -244,13 +240,15 @@
                     <table class="w-full text-left border-collapse text-xs">
                         <thead class="bg-slate-900 text-slate-300 sticky top-0">
                             <tr>
-                                <th class="p-3 border-b border-slate-800">Görev</th>
-                                <th class="p-3 border-b border-slate-800">Proje & Modül</th>
-                                <th class="p-3 border-b border-slate-800">Sorumlu & Teslim</th>
-                                <th class="p-3 border-b border-slate-800">Erken Risk Skoru</th>
-                                <th class="p-3 border-b border-slate-800">Neden Riskli? (XAI Özeti)</th>
-                                <th class="p-3 border-b border-slate-800">Önerilen Müdahale</th>
-                                <th class="p-3 border-b border-slate-800 text-center">İşlem</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold whitespace-nowrap">Görev ID</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Başlık</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Proje</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Modül</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Sorumlu</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Teslim Tarihi</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold min-w-[150px]">Risk Skoru</th>
+                                <th class="p-3 border-b border-slate-800 font-semibold">Neden Riskli? (XAI)</th>
+                                <th class="p-3 border-b border-slate-800 text-center font-semibold">İşlem</th>
                             </tr>
                         </thead>
                         <tbody id="earlyRadarTableBody" class="divide-y divide-slate-800/80 text-slate-200"></tbody>
