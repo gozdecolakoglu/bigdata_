@@ -1,0 +1,121 @@
+version: "3.8"
+
+services:
+  # =========================================================================
+  # HADOOP DISTRIBUTED FILE SYSTEM (HDFS) - REPLICATION FACTOR = 3
+  # =========================================================================
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: bigdata-namenode
+    restart: always
+    ports:
+      - "9870:9870"  # HDFS NameNode Web UI
+      - "9000:9000"  # HDFS RPC Port
+    environment:
+      - CLUSTER_NAME=bigdata-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=3
+      - HDFS_CONF_dfs_blocksize=134217728 # 128 MB Block Size
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/opt/local_data
+    networks:
+      - bigdata-net
+
+  datanode1:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: bigdata-datanode-1
+    restart: always
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=3
+    volumes:
+      - hadoop_datanode1:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - bigdata-net
+
+  datanode2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: bigdata-datanode-2
+    restart: always
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=3
+    volumes:
+      - hadoop_datanode2:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - bigdata-net
+
+  datanode3:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: bigdata-datanode-3
+    restart: always
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=3
+    volumes:
+      - hadoop_datanode3:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - bigdata-net
+
+  # =========================================================================
+  # APACHE SPARK DAĞITIK HESAPLAMA KÜMESİ (MASTER + 2 WORKERS)
+  # =========================================================================
+  spark-master:
+    image: bde2020/spark-master:3.1.1-hadoop3.2
+    container_name: bigdata-spark-master
+    ports:
+      - "8080:8080"  # Spark Master Web UI
+      - "7077:7077"  # Spark Master RPC
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+      - SPARK_CONF_spark_eventLog_enabled=true
+    volumes:
+      - ./data:/opt/spark_data
+      - ./:/opt/project
+    networks:
+      - bigdata-net
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.1.1-hadoop3.2
+    container_name: bigdata-spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"  # Spark Worker 1 Web UI
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+    networks:
+      - bigdata-net
+
+  spark-worker-2:
+    image: bde2020/spark-worker:3.1.1-hadoop3.2
+    container_name: bigdata-spark-worker-2
+    depends_on:
+      - spark-master
+    ports:
+      - "8082:8082"  # Spark Worker 2 Web UI
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+    networks:
+      - bigdata-net
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode1:
+  hadoop_datanode2:
+  hadoop_datanode3:
+
+networks:
+  bigdata-net:
+    driver: bridge

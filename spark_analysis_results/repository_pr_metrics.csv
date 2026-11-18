@@ -1,0 +1,9 @@
+repository,total_prs,avg_pr_risk,avg_merge_hours,avg_code_churn,avg_ci_failures,critical_prs
+ecommerce-order-service,70379,66.07,40.46,889.23,1.01,31289
+crm-realtime-engine,71020,66.05,40.56,892.95,1.01,31617
+enterprise-ai-copilot,70904,66.04,40.41,885.31,1.01,31549
+medtech-ehr-platform,71741,65.95,40.35,886.1,1.01,31738
+logistics-route-optimizer,70514,65.93,40.4,885.75,1.01,31237
+fintech-payment-core,70752,65.92,40.41,890.62,1.01,31307
+cloud-infra-gitops,71126,65.77,40.27,882.52,1.01,31308
+iam-zerotrust-gateway,70759,65.7,40.21,879.86,1.01,31001

@@ -1,0 +1,9 @@
+project,total_tasks,avg_risk_score,critical_tasks,high_tasks,delayed_tasks,delay_rate_pct,avg_actual_effort,avg_effort_variance_pct
+PRJ-ECOM - Yeni Nesil E-Ticaret Mikroservis Dönüşümü,37192,52.82,7469,11501,22781,61.25,47.86,56.3
+PRJ-FIN - FinTech Ödeme ve Açık Bankacılık Platformu,37423,52.67,7401,11618,22947,61.32,47.91,56.15
+PRJ-CRM - Müşteri 360 ve Gerçek Zamanlı Kampanya Motoru,37518,52.6,7401,11717,22990,61.28,47.38,55.94
+PRJ-HEALTH - Telesağlık ve Elektronik Hasta Kayıt Sistemi,37796,52.57,7549,11662,23136,61.21,47.28,55.96
+PRJ-LOG - Akıllı Lojistik Rota Optimizasyonu ve Filo Takibi,37434,52.56,7333,11675,22958,61.33,47.79,55.99
+PRJ-AI - Kurumsal Üretken Yapay Zeka ve Analitik Asistanı,37620,52.51,7442,11525,22915,60.91,47.62,55.89
+PRJ-CLOUD - Çoklu Bulut (Multi-Cloud) Kubernetes Altyapısı,37511,52.44,7371,11545,22804,60.79,47.13,55.72
+PRJ-SEC - Sıfır Güven (Zero-Trust) Kimlik ve Erişim Yönetimi,37506,52.41,7270,11609,22818,60.84,47.05,55.67

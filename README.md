@@ -227,4 +227,36 @@ Proje, hem yerel **Streamlit (`dashboard.py`)** hem de **Vercel Serverless + Web
    npx vercel --prod
    ```
 
+---
+
+## 7. Büyük Veri (Big Data) Güncellemeleri ve Dağıtık Mimari (Replication Factor = 3)
+
+Hocamızın ve jürinin büyük veri kriterleri doğrultusunda projeye 4 ana genişletme entegre edilmiştir:
+
+### 1. Hacim Genişletme (1 GB+ CSV Veri Seti)
+- `generate_bigdata.py` motoru bellek dostu (memory-efficient streaming) mimariye kavuşturulmuştur.
+- Üretilen `pull_requests_dataset.csv` dosya boyutu **1.09 GB (1,117.71 MB)** seviyesine çıkarılmıştır.
+- Toplam üretilen satır sayısı: **300.000 Task** ve **567.195 Pull Request** (Toplam CSV hacmi: **1.48 GB**).
+
+### 2. Parquet Sütun Bazlı Depolama ve Sıkıştırma (`csv_to_parquet_converter.py`)
+- CSV dosyaları Snappy sıkıştırmalı Parquet formatına dönüştürülmüştür.
+- **Sonuç:** 1.09 GB CSV dosyası sadece **72.76 MB** Parquet boyutuna inerek **%93.5 disk tasarrufu** sağlamıştır.
+- Kolon bazlı projeksiyon sayesinde okuma hızı **129.7 kat** hızlanmıştır.
+
+### 3. Apache Spark ile Dağıtık Analiz (`spark_analysis.py`)
+- Apache Spark (PySpark DataFrame API & Spark SQL) ile büyük veri analitiği:
+  * CSV vs Parquet okuma süresi ve I/O throughput benchmark'ı
+  * Proje bazında risk skorları, gecikme oranları ve efor sapmaları
+  * Geliştirici darboğazları ve blocker analizleri
+  * Spark Window fonksiyonları ile partisyon bazlı en riskli görev sıralamaları
+  * Çıktıların `spark_analysis_results/` dizinine otomatik raporlanması
+
+### 4. Dağıtık Mimari ve Replication Factor = 3 (`docker-compose.distributed.yml`)
+- **Hadoop HDFS Kümesi:** 1 NameNode (Master) + 3 bağımsız DataNode (DataNode-1, DataNode-2, DataNode-3).
+- **Replication Factor: 3:** Her 128 MB'lık HDFS bloğu tam 3 farklı DataNode üzerinde kopyalanır (`dfs.replication = 3`).
+- **Arıza Toleransı (Fault Tolerance):** Kümedeki 2 DataNode aynı anda çökse bile hiçbir veri kaybı yaşanmaz.
+- **Canlı Simülatör (`distributed_architecture_simulator.py`):** 128 MB blok bölme, 3 replika haritası ve canlı arıza toleransı testini terminalde adım adım gösterir.
+- Detaylı akademik doküman: [`DISTRIBUTED_BIGDATA_ARCHITECTURE.md`](file:///c:/karışık/bigdata_/DISTRIBUTED_BIGDATA_ARCHITECTURE.md)
+
+
 

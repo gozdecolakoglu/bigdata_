@@ -40,6 +40,7 @@ const TASK_PARQUET_COLUMNS = [
     "status",
     "start_date",
     "due_date",
+    "actual_end_date",
     "sprint_iteration",
     "estimated_effort_hours",
     "story_points",
@@ -101,7 +102,7 @@ async function getHyparquet() {
         try {
             hyparquetModule = await import(url);
             if (hyparquetModule) break;
-        } catch (_) {}
+        } catch (_) { }
     }
     if (!hyparquetModule) {
         throw new Error("Parquet okuma modülü (hyparquet) yüklenemedi. Lütfen internet bağlantınızı kontrol edin veya CSV / JSON formatında dosya yükleyin.");
@@ -118,7 +119,7 @@ async function getHyparquet() {
                     hyparquetCompressors = compMod.compressors;
                     break;
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
     }
     return hyparquetModule;
@@ -283,6 +284,7 @@ function normalizeAndEnrichTasks(tasks, cleanVeracity = false) {
             project,
             project_short: projectShort,
             component_module: componentModule,
+            task_type: t.task_type || "Task",
             status,
             priority,
             environment,
@@ -290,6 +292,7 @@ function normalizeAndEnrichTasks(tasks, cleanVeracity = false) {
             sprint_iteration: t.sprint_iteration || "Sprint-01",
             start_date: t.start_date || "-",
             due_date: t.due_date || "-",
+            actual_end_date: t.actual_end_date || "-",
             story_points: storyPoints,
             estimated_effort_hours: est,
             actual_effort_hours: act,
@@ -534,6 +537,8 @@ function applyFiltersAndRender() {
     renderTab4PrAnalytics();
     renderTab5MlAnd5V(enrichedTasksCache, enrichedPrsCache);
     renderTab6ActionPlanAndExport();
+    syncExplorerControls();
+    renderTab7Explorer(true);
 }
 
 function renderKpis() {
@@ -579,7 +584,8 @@ function renderKpis() {
         document.getElementById("kpiEarlyAlerts").textContent = `${gm.early_at_risk_open.toLocaleString()} Görev`;
         document.getElementById("kpiEarlyAlertsSub").textContent = `${gm.open_tasks_count.toLocaleString()} açık iş içinde yüksek riskli`;
         document.getElementById("kpiAvgRisk").textContent = `${gm.avg_risk_score.toFixed(1)} / 100`;
-        document.getElementById("kpiCriticalCount").textContent = `Kritik & Yüksek: ${gm.critical_high_count.toLocaleString()} (%51)`;
+        const critPct = gm.total_tasks ? Math.round((gm.critical_high_count / gm.total_tasks) * 100) : 0;
+        document.getElementById("kpiCriticalCount").textContent = `Kritik & Yüksek: ${gm.critical_high_count.toLocaleString()} (%${critPct})`;
         document.getElementById("kpiDelayRatio").textContent = `%${gm.delayed_ratio.toFixed(1)}`;
         document.getElementById("kpiAvgDelayDays").textContent = `Gecikenlerde ort. +${gm.avg_delay_days.toFixed(1)} gün sapma`;
 
@@ -902,13 +908,16 @@ function renderTab2Inspector(forcedTaskId = null) {
         },
     });
 
+    const endLabel = task.status === "Done" ? "Gerçekleşen Bitiş" : "Öngörülen Bitiş";
+    const delayTxt = Number(task.delay_days || 0);
     document.getElementById("inspectorTaskDetails").innerHTML = `
         <h3 class="text-sm font-bold text-white mb-2">📋 Görev Planlama Özeti</h3>
         <div class="grid grid-cols-2 gap-2.5 bg-slate-900/60 p-3 rounded-lg border border-slate-800">
             <div><span class="text-slate-400 block text-[11px]">Sprint Dönemi</span><b>${task.sprint_iteration || "-"}</b></div>
             <div><span class="text-slate-400 block text-[11px]">Planlanan Teslim</span><b>${task.start_date || "-"} → ${task.due_date || "-"}</b></div>
+            <div><span class="text-slate-400 block text-[11px]">${endLabel}</span><b>${task.actual_end_date || "-"} (${delayTxt >= 0 ? "+" : ""}${delayTxt} gün)</b></div>
             <div><span class="text-slate-400 block text-[11px]">Karmaşıklık & Tahmin</span><b>${task.story_points} SP / ${task.estimated_effort_hours} Saat</b></div>
-            <div><span class="text-slate-400 block text-[11px]">Ön Koşul Görevler</span><b>${task.dependencies || "Yok"}</b></div>
+            <div class="col-span-2"><span class="text-slate-400 block text-[11px]">Ön Koşul Görevler</span><b>${task.dependencies || "Yok"}</b></div>
         </div>
         <div class="pt-2 space-y-1.5">
             <p class="text-slate-200 leading-relaxed"><b>📄 Görev Açıklaması:</b> ${task.description || "-"}</p>
@@ -1335,6 +1344,337 @@ function renderTab6ActionPlanAndExport() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SEKME 7: TÜM TASK & PR VERİ GEZGİNİ
+// ---------------------------------------------------------------------------
+let explorerMode = "tasks";
+let explorerPage = 1;
+let explorerFilteredRows = [];
+
+function escapeHtml(val) {
+    return String(val ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function syncExplorerControls() {
+    const statusSel = document.getElementById("expStatusSelect");
+    const sortSel = document.getElementById("expSortSelect");
+    if (!statusSel || !sortSel) return;
+
+    const prevStatus = statusSel.value || "ALL";
+    const source = explorerMode === "tasks" ? filteredTasks : filteredPrs;
+    const statusSet = new Set();
+    for (let i = 0; i < source.length; i++) {
+        if (source[i].status) statusSet.add(String(source[i].status));
+    }
+    const statuses = [...statusSet].sort();
+    statusSel.innerHTML = `<option value="ALL">Tümü (${statuses.length})</option>` +
+        statuses.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+    if (statusSet.has(prevStatus)) statusSel.value = prevStatus;
+
+    const prevSort = sortSel.value;
+    const sortOpts = explorerMode === "tasks"
+        ? [
+            ["risk_desc", "Risk Skoru (Yüksek → Düşük)"],
+            ["risk_asc", "Risk Skoru (Düşük → Yüksek)"],
+            ["id_asc", "Görev ID (A → Z)"],
+            ["delay_desc", "Gecikme Günü (Yüksek → Düşük)"],
+            ["due_asc", "Teslim Tarihi (En Yakın)"],
+        ]
+        : [
+            ["risk_desc", "PR Risk Skoru (Yüksek → Düşük)"],
+            ["risk_asc", "PR Risk Skoru (Düşük → Yüksek)"],
+            ["id_asc", "PR ID (A → Z)"],
+            ["files_desc", "Değişen Dosya (Çok → Az)"],
+            ["merge_desc", "Merge Süresi (Uzun → Kısa)"],
+        ];
+    sortSel.innerHTML = sortOpts.map(([val, lbl]) => `<option value="${val}">${lbl}</option>`).join("");
+    if (sortOpts.some(([val]) => val === prevSort)) {
+        sortSel.value = prevSort;
+    }
+
+    const subtitle = document.getElementById("expSubtitle");
+    if (subtitle) {
+        subtitle.textContent = `Mevcut filtrelere göre ${filteredTasks.length.toLocaleString()} Görev (Task) ve ${filteredPrs.length.toLocaleString()} Pull Request (PR) kaydını inceleyin.`;
+    }
+}
+
+function setExplorerMode(mode) {
+    explorerMode = mode;
+    const tBtn = document.getElementById("expModeTasksBtn");
+    const pBtn = document.getElementById("expModePrsBtn");
+    if (tBtn && pBtn) {
+        if (mode === "tasks") {
+            tBtn.className = "px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 text-white transition";
+            pBtn.className = "px-3 py-1.5 rounded-md text-xs font-semibold text-slate-300 hover:text-white transition";
+        } else {
+            pBtn.className = "px-3 py-1.5 rounded-md text-xs font-semibold bg-indigo-600 text-white transition";
+            tBtn.className = "px-3 py-1.5 rounded-md text-xs font-semibold text-slate-300 hover:text-white transition";
+        }
+    }
+    syncExplorerControls();
+    renderTab7Explorer(true);
+}
+
+function renderTab7Explorer(resetPage = false) {
+    const thead = document.getElementById("expTableHead");
+    const tbody = document.getElementById("expTableBody");
+    const pageInfo = document.getElementById("expPageInfo");
+    const pageInd = document.getElementById("expPageIndicator");
+    const prevBtn = document.getElementById("expPrevBtn");
+    const nextBtn = document.getElementById("expNextBtn");
+    if (!thead || !tbody) return;
+
+    if (resetPage) explorerPage = 1;
+
+    const query = (document.getElementById("expSearchInput")?.value || "").trim().toLowerCase();
+    const statusFilter = document.getElementById("expStatusSelect")?.value || "ALL";
+    const riskFilter = document.getElementById("expRiskSelect")?.value || "ALL";
+    const sortKey = document.getElementById("expSortSelect")?.value || "risk_desc";
+    const pageSize = Number(document.getElementById("expPageSize")?.value || 50);
+
+    const source = explorerMode === "tasks" ? filteredTasks : filteredPrs;
+    const rows = [];
+
+    for (let i = 0; i < source.length; i++) {
+        const r = source[i];
+        if (statusFilter !== "ALL" && String(r.status || "") !== statusFilter) continue;
+        const rLevel = explorerMode === "tasks" ? r.delivery_risk_level : (r.pr_risk_level || "Medium");
+        if (riskFilter !== "ALL" && rLevel !== riskFilter) continue;
+
+        if (query) {
+            const hay = explorerMode === "tasks"
+                ? `${r.task_id} ${r.task_title || ""} ${r.project || ""} ${r.component_module || ""} ${r.assignee || ""} ${r.xai_primary_risk_factors || ""}`
+                : `${r.pr_id} ${r.pr_title || ""} ${r.linked_task_issue || ""} ${r.merge_conflicts || ""} ${r.pipeline_status || ""} ${r.security_scan_status || ""} ${r.xai_pr_risk_factors || ""}`;
+            if (!hay.toLowerCase().includes(query)) continue;
+        }
+        rows.push(r);
+    }
+
+    rows.sort((a, b) => {
+        if (explorerMode === "tasks") {
+            if (sortKey === "risk_asc") return (a.combined_early_risk_score || 0) - (b.combined_early_risk_score || 0);
+            if (sortKey === "id_asc") return String(a.task_id).localeCompare(String(b.task_id));
+            if (sortKey === "delay_desc") return (b.delay_days || 0) - (a.delay_days || 0);
+            if (sortKey === "due_asc") return String(a.due_date || "9999").localeCompare(String(b.due_date || "9999"));
+            return (b.combined_early_risk_score || 0) - (a.combined_early_risk_score || 0);
+        } else {
+            if (sortKey === "risk_asc") return (Number(a.pr_risk_score) || 0) - (Number(b.pr_risk_score) || 0);
+            if (sortKey === "id_asc") return String(a.pr_id).localeCompare(String(b.pr_id));
+            if (sortKey === "files_desc") return (Number(b.changed_files_count) || 0) - (Number(a.changed_files_count) || 0);
+            if (sortKey === "merge_desc") return (Number(b.time_to_merge_hours) || 0) - (Number(a.time_to_merge_hours) || 0);
+            return (Number(b.pr_risk_score) || 0) - (Number(a.pr_risk_score) || 0);
+        }
+    });
+
+    explorerFilteredRows = rows;
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (explorerPage > totalPages) explorerPage = totalPages;
+    if (explorerPage < 1) explorerPage = 1;
+
+    const startIdx = (explorerPage - 1) * pageSize;
+    const endIdx = Math.min(total, startIdx + pageSize);
+    const pageRows = rows.slice(startIdx, endIdx);
+
+    if (pageInfo) {
+        pageInfo.innerHTML = `Toplam <b class="text-white">${total.toLocaleString()}</b> kayıt | Gösterilen: <b>${total ? (startIdx + 1).toLocaleString() : 0}–${endIdx.toLocaleString()}</b>`;
+    }
+    if (pageInd) pageInd.textContent = `${explorerPage.toLocaleString()} / ${totalPages.toLocaleString()}`;
+    if (prevBtn) prevBtn.disabled = explorerPage <= 1;
+    if (nextBtn) nextBtn.disabled = explorerPage >= totalPages;
+
+    if (explorerMode === "tasks") {
+        thead.innerHTML = `
+            <tr>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Görev ID</th>
+                <th class="p-2.5 border-b border-slate-800">Başlık</th>
+                <th class="p-2.5 border-b border-slate-800">Proje & Modül</th>
+                <th class="p-2.5 border-b border-slate-800">Tür / Öncelik</th>
+                <th class="p-2.5 border-b border-slate-800">Durum</th>
+                <th class="p-2.5 border-b border-slate-800">Sorumlu</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Sprint & Teslim</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">SP / Efor</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Engel / PR</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Risk</th>
+                <th class="p-2.5 border-b border-slate-800">Neden Riskli? (XAI)</th>
+            </tr>
+        `;
+        tbody.innerHTML = pageRows.length === 0
+            ? `<tr><td colspan="11" class="p-6 text-center text-slate-400">Eşleşen görev kaydı bulunamadı.</td></tr>`
+            : pageRows.map((t, idx) => `
+                <tr class="hover:bg-slate-800/70 cursor-pointer transition" data-expidx="${startIdx + idx}">
+                    <td class="p-2.5 font-mono font-bold text-blue-400 whitespace-nowrap">${escapeHtml(t.task_id)}</td>
+                    <td class="p-2.5 max-w-[230px] truncate font-medium text-slate-100" title="${escapeHtml(t.task_title)}">${escapeHtml(t.task_title || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(t.project_short || t.project)} • <span class="text-slate-400">${escapeHtml(t.component_module || "-")}</span></td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(t.task_type || "-")} / <span class="text-slate-300">${escapeHtml(t.priority || "-")}</span></td>
+                    <td class="p-2.5 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-200">${escapeHtml(t.status || "-")}</span></td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(t.assignee || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(t.sprint_iteration || "-")} • ${escapeHtml(t.due_date || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap">${t.story_points ?? "-"} SP / ${t.estimated_effort_hours ?? "-"}s</td>
+                    <td class="p-2.5 whitespace-nowrap">${t.blocker_count ?? 0} Blk • ${t.linked_pr_count ?? 0} PR</td>
+                    <td class="p-2.5 whitespace-nowrap">
+                        <span class="font-bold text-amber-300">${Number(t.combined_early_risk_score || 0).toFixed(1)}</span>
+                        <span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold badge-${escapeHtml(t.delivery_risk_level)}">${escapeHtml(t.delivery_risk_level)}</span>
+                    </td>
+                    <td class="p-2.5 max-w-[220px] truncate text-amber-200/90" title="${escapeHtml(t.xai_primary_risk_factors)}">${escapeHtml(t.xai_primary_risk_factors || "-")}</td>
+                </tr>
+            `).join("");
+    } else {
+        thead.innerHTML = `
+            <tr>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">PR ID</th>
+                <th class="p-2.5 border-b border-slate-800">PR Başlığı</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Bağlı Görev</th>
+                <th class="p-2.5 border-b border-slate-800">Durum</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">PR Risk</th>
+                <th class="p-2.5 border-b border-slate-800">Merge Conflict</th>
+                <th class="p-2.5 border-b border-slate-800">Pipeline (CI)</th>
+                <th class="p-2.5 border-b border-slate-800">Güvenlik (SAST)</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Dosya / Satır</th>
+                <th class="p-2.5 border-b border-slate-800 whitespace-nowrap">Merge (sa)</th>
+                <th class="p-2.5 border-b border-slate-800">XAI PR Risk Nedenleri</th>
+            </tr>
+        `;
+        tbody.innerHTML = pageRows.length === 0
+            ? `<tr><td colspan="11" class="p-6 text-center text-slate-400">Eşleşen PR kaydı bulunamadı.</td></tr>`
+            : pageRows.map((p, idx) => `
+                <tr class="hover:bg-slate-800/70 cursor-pointer transition" data-expidx="${startIdx + idx}">
+                    <td class="p-2.5 font-mono font-bold text-indigo-400 whitespace-nowrap">${escapeHtml(p.pr_id)}</td>
+                    <td class="p-2.5 max-w-[230px] truncate font-medium text-slate-100" title="${escapeHtml(p.pr_title)}">${escapeHtml(p.pr_title || "-")}</td>
+                    <td class="p-2.5 font-mono text-blue-300 whitespace-nowrap">${escapeHtml(p.linked_task_issue || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-200">${escapeHtml(p.status || "-")}</span></td>
+                    <td class="p-2.5 whitespace-nowrap">
+                        <span class="font-bold text-amber-300">${Number(p.pr_risk_score || 0).toFixed(1)}</span>
+                        <span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold badge-${escapeHtml(p.pr_risk_level || "Medium")}">${escapeHtml(p.pr_risk_level || "Medium")}</span>
+                    </td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(p.merge_conflicts || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(p.pipeline_status || "-")} (${p.ci_failure_count ?? 0} hata)</td>
+                    <td class="p-2.5 whitespace-nowrap">${escapeHtml(p.security_scan_status || "-")}</td>
+                    <td class="p-2.5 whitespace-nowrap">${p.changed_files_count ?? 0} dosya (+${p.lines_added ?? 0}/-${p.lines_deleted ?? 0})</td>
+                    <td class="p-2.5 whitespace-nowrap">${Number(p.time_to_merge_hours || 0).toFixed(1)} sa</td>
+                    <td class="p-2.5 max-w-[220px] truncate text-amber-200/90" title="${escapeHtml(p.xai_pr_risk_factors)}">${escapeHtml(p.xai_pr_risk_factors || "-")}</td>
+                </tr>
+            `).join("");
+    }
+
+    tbody.querySelectorAll("tr[data-expidx]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+            const idx = Number(tr.getAttribute("data-expidx"));
+            renderExplorerDetail(explorerFilteredRows[idx]);
+        });
+    });
+
+    if (pageRows.length > 0) {
+        renderExplorerDetail(pageRows[0]);
+    } else {
+        const detailCard = document.getElementById("expDetailCard");
+        if (detailCard) {
+            detailCard.innerHTML = `<div class="text-xs text-slate-400">Gösterilecek kayıt detayı bulunamadı.</div>`;
+        }
+    }
+}
+
+function renderExplorerDetail(row) {
+    const box = document.getElementById("expDetailCard");
+    if (!box || !row) return;
+
+    if (explorerMode === "tasks") {
+        const linkedPrs = prsByTaskId.get(row.task_id) || [];
+        box.innerHTML = `
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pb-3 border-b border-slate-800">
+                <div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-sm font-bold text-white">${escapeHtml(row.task_id)} — ${escapeHtml(row.task_title || "")}</span>
+                        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold badge-${escapeHtml(row.delivery_risk_level)}">${escapeHtml(row.delivery_risk_level)}</span>
+                    </div>
+                    <div class="text-xs text-slate-400 mt-1">
+                        🏢 ${escapeHtml(row.project || "-")} • 🧩 ${escapeHtml(row.component_module || "-")} • 👤 ${escapeHtml(row.assignee || "-")} • 📌 <code>${escapeHtml(row.status || "-")}</code>
+                    </div>
+                </div>
+                <button id="expJumpToInspectorBtn" class="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 text-xs font-semibold transition self-start">
+                    🔍 2. Sekmedeki Müfettişte Aç →
+                </button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3 text-xs">
+                <div class="space-y-2 text-slate-300">
+                    <div><b>Tür / Öncelik / Ortam:</b> ${escapeHtml(row.task_type || "-")} • ${escapeHtml(row.priority || "-")} • ${escapeHtml(row.environment || "-")}</div>
+                    <div><b>Sprint & Tarihler:</b> ${escapeHtml(row.sprint_iteration || "-")} | ${escapeHtml(row.start_date || "-")} → ${escapeHtml(row.due_date || "-")} | ${row.status === "Done" ? "Gerçekleşen" : "Öngörülen"} Bitiş: <b>${escapeHtml(row.actual_end_date || "-")}</b> (${(row.delay_days ?? 0) >= 0 ? "+" : ""}${row.delay_days ?? 0} gün)</div>
+                    <div><b>Karmaşıklık & Efor:</b> ${row.story_points ?? "-"} SP | Tahmini: ${row.estimated_effort_hours ?? "-"} sa | Gerçekleşen: ${row.actual_effort_hours ?? "-"} sa</div>
+                    <div><b>Engeller & Bağımlılık:</b> ${row.blocker_count ?? 0} Blocker • ${row.requirement_change_count ?? 0} Kapsam Değ. • ${row.reopen_count ?? 0} Reopen • Ön koşul: <code>${escapeHtml(row.dependencies || "Yok")}</code></div>
+                    <div><b>Veri Kalitesi:</b> <code>${escapeHtml(row.data_quality_flag || "Clean")}</code> • <b>Bağlı PR:</b> ${linkedPrs.length} adet</div>
+                    <div class="pt-1"><b>📄 Açıklama:</b> ${escapeHtml(row.description || "-")}</div>
+                    <div class="text-slate-400"><b>✅ Kabul Kriterleri:</b> ${escapeHtml(row.acceptance_criteria || "-")}</div>
+                </div>
+                <div class="space-y-3">
+                    <div class="bg-amber-950/25 border border-amber-500/40 border-l-4 border-l-amber-500 rounded-xl p-3">
+                        <div class="text-[11px] font-bold uppercase text-amber-400 mb-1">🧠 XAI Risk Teşhisi (${Number(row.combined_early_risk_score || 0).toFixed(1)}/100)</div>
+                        <div class="text-slate-100">${escapeHtml(row.xai_primary_risk_factors || "-")}</div>
+                    </div>
+                    <div class="bg-teal-950/25 border border-teal-500/40 border-l-4 border-l-teal-400 rounded-xl p-3">
+                        <div class="text-[11px] font-bold uppercase text-teal-300 mb-1">💡 Önerilen Karar Destek Aksiyonu</div>
+                        <div class="text-slate-100">${escapeHtml(row.xai_recommended_actions || "-")}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        const jumpBtn = document.getElementById("expJumpToInspectorBtn");
+        if (jumpBtn) {
+            jumpBtn.addEventListener("click", () => {
+                renderTab2Inspector(row.task_id);
+                switchTab("tab2");
+            });
+        }
+    } else {
+        const linkedTask = taskByIdMap.get(row.linked_task_issue);
+        box.innerHTML = `
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pb-3 border-b border-slate-800">
+                <div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-sm font-bold text-white">${escapeHtml(row.pr_id)} — ${escapeHtml(row.pr_title || "")}</span>
+                        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold badge-${escapeHtml(row.pr_risk_level || "Medium")}">${escapeHtml(row.pr_risk_level || "Medium")}</span>
+                    </div>
+                    <div class="text-xs text-slate-400 mt-1">
+                        🔗 Bağlı Görev: <code class="text-blue-300">${escapeHtml(row.linked_task_issue || "-")}</code> ${linkedTask ? `(${escapeHtml(linkedTask.task_title || "")} • ${escapeHtml(linkedTask.assignee || "-")})` : ""}
+                    </div>
+                </div>
+                ${linkedTask ? `<button id="expJumpPrTaskBtn" class="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 text-xs font-semibold transition self-start">🔍 Bağlı Görevi Müfettişte Aç →</button>` : ""}
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-3 text-xs">
+                <div class="space-y-2 text-slate-300">
+                    <div><b>Durum & PR Risk:</b> <code>${escapeHtml(row.status || "-")}</code> • Risk Skoru: <b class="text-amber-300">${Number(row.pr_risk_score || 0).toFixed(1)}/100</b></div>
+                    <div><b>Kod Değişimi:</b> ${row.changed_files_count ?? 0} dosya (+${row.lines_added ?? 0} / -${row.lines_deleted ?? 0}) • ${row.commit_count ?? 0} commit</div>
+                    <div><b>Merge & Pipeline:</b> Conflict: <code>${escapeHtml(row.merge_conflicts || "-")}</code> • Pipeline: <code>${escapeHtml(row.pipeline_status || "-")}</code> (${row.ci_failure_count ?? 0} hata)</div>
+                    <div><b>Güvenlik & İnceleme:</b> ${escapeHtml(row.security_scan_status || "-")} • ${row.review_iteration_count ?? 0} tur • İlk İnceleme: ${row.time_to_first_review_hours ?? 0} sa • Merge: ${row.time_to_merge_hours ?? 0} sa</div>
+                    <div><b>Veri Kalitesi:</b> <code>${escapeHtml(row.data_quality_flag || "Clean")}</code></div>
+                    ${row.review_comments ? `<div class="text-slate-400 pt-1"><b>💬 İnceleme Yorumları:</b> ${escapeHtml(row.review_comments)}</div>` : ""}
+                </div>
+                <div class="space-y-3">
+                    <div class="bg-amber-950/25 border border-amber-500/40 border-l-4 border-l-amber-500 rounded-xl p-3">
+                        <div class="text-[11px] font-bold uppercase text-amber-400 mb-1">🧠 XAI PR Risk Nedenleri</div>
+                        <div class="text-slate-100">${escapeHtml(row.xai_pr_risk_factors || "-")}</div>
+                    </div>
+                    <div class="bg-teal-950/25 border border-teal-500/40 border-l-4 border-l-teal-400 rounded-xl p-3">
+                        <div class="text-[11px] font-bold uppercase text-teal-300 mb-1">💡 XAI PR Müdahale Önerisi</div>
+                        <div class="text-slate-100">${escapeHtml(row.xai_pr_recommended_actions || "-")}</div>
+                    </div>
+                </div>
+            </div>
+            ${row.diff_code_changes ? `<details class="mt-3"><summary class="cursor-pointer text-xs font-semibold text-slate-300 hover:text-white">🧾 Kod Değişikliği (Diff) Önizlemesi</summary><pre class="mt-2 p-3 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 overflow-x-auto max-h-60">${escapeHtml(row.diff_code_changes)}</pre></details>` : ""}
+        `;
+        const jumpPrBtn = document.getElementById("expJumpPrTaskBtn");
+        if (jumpPrBtn && linkedTask) {
+            jumpPrBtn.addEventListener("click", () => {
+                renderTab2Inspector(linkedTask.task_id);
+                switchTab("tab2");
+            });
+        }
+    }
+}
+
 function exportCsvReport() {
     const cols = [
         "task_id", "task_title", "project", "component_module", "status", "priority",
@@ -1400,7 +1740,7 @@ async function fetchFirstValid(candidates, options = {}) {
         try {
             const res = await fetch(url, options);
             if (res.ok) return { res, url };
-        } catch (_) {}
+        } catch (_) { }
     }
     return null;
 }
@@ -1450,15 +1790,17 @@ async function loadDefaultDataFromDataDir() {
             streamEvents = (data.stream && data.stream.length > 0) ? data.stream : (await fetchStreamEventsFromDataDir());
             dataDirty = true;
 
-            taskSourceLabel = `data/tasks_dataset.parquet (80,000 Görev • 151,105 PR)`;
-            prSourceLabel = `data/pull_requests_dataset.parquet (80,000 Görev • 151,105 PR)`;
+            const totalTasksLabel = Number(data.global_metrics?.total_tasks || rawTasks.length).toLocaleString();
+            const totalPrsLabel = Number(data.global_metrics?.total_prs || rawPrs.length).toLocaleString();
+            taskSourceLabel = `data/tasks_dataset.parquet (${totalTasksLabel} Görev • ${totalPrsLabel} PR)`;
+            prSourceLabel = `data/pull_requests_dataset.parquet (${totalTasksLabel} Görev • ${totalPrsLabel} PR)`;
             const taskEl = document.getElementById("taskUploadStatus");
             if (taskEl) taskEl.textContent = `✅ data/tasks_dataset.parquet aktif`;
             const prEl = document.getElementById("prUploadStatus");
             if (prEl) prEl.textContent = `✅ data/pull_requests_dataset.parquet aktif`;
             const banner = document.getElementById("activeSourceBanner");
             if (banner) {
-                banner.textContent = `📋 80,000 Görev • 🔀 151,105 PR • 🧹 Ham Veri`;
+                banner.textContent = `📋 ${totalTasksLabel} Görev • 🔀 ${totalPrsLabel} PR • 🧹 Ham Veri`;
             }
             applyFiltersAndRender();
             return;
@@ -1638,6 +1980,40 @@ function bindEvents() {
     if (tabCsvBtn) tabCsvBtn.addEventListener("click", exportCsvReport);
     const tabJsonBtn = document.getElementById("tabDownloadJsonBtn");
     if (tabJsonBtn) tabJsonBtn.addEventListener("click", exportJsonReport);
+
+    const expModeTasksBtn = document.getElementById("expModeTasksBtn");
+    if (expModeTasksBtn) expModeTasksBtn.addEventListener("click", () => setExplorerMode("tasks"));
+    const expModePrsBtn = document.getElementById("expModePrsBtn");
+    if (expModePrsBtn) expModePrsBtn.addEventListener("click", () => setExplorerMode("prs"));
+
+    let expSearchTimer = null;
+    const expSearchInput = document.getElementById("expSearchInput");
+    if (expSearchInput) {
+        expSearchInput.addEventListener("input", () => {
+            clearTimeout(expSearchTimer);
+            expSearchTimer = setTimeout(() => renderTab7Explorer(true), 150);
+        });
+    }
+    ["expStatusSelect", "expRiskSelect", "expSortSelect", "expPageSize"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("change", () => renderTab7Explorer(true));
+    });
+    const expPrevBtn = document.getElementById("expPrevBtn");
+    if (expPrevBtn) {
+        expPrevBtn.addEventListener("click", () => {
+            if (explorerPage > 1) {
+                explorerPage -= 1;
+                renderTab7Explorer(false);
+            }
+        });
+    }
+    const expNextBtn = document.getElementById("expNextBtn");
+    if (expNextBtn) {
+        expNextBtn.addEventListener("click", () => {
+            explorerPage += 1;
+            renderTab7Explorer(false);
+        });
+    }
 }
 
 window.addEventListener("DOMContentLoaded", () => {

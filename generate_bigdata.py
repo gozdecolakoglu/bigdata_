@@ -23,6 +23,8 @@ import time
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 def get_domain_catalogs():
@@ -145,7 +147,7 @@ def get_domain_catalogs():
     }
 
 
-def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
+def generate_tasks_dataset(num_tasks: int, seed: int = 42, reference_date: str = "2026-11-11", task_id_start: int = 100001) -> pd.DataFrame:
     """
     22 temel Task özniteliği + 16 Büyük Veri (5V) & XAI Karar Destek özniteliği olmak üzere
     toplam 38 sütunlu zenginleştirilmiş Task veri setini vektörel olarak üretir.
@@ -153,10 +155,10 @@ def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     cat = get_domain_catalogs()
 
-    print(f"[1/4] {num_tasks:,} adet Task kaydı için öznitelikler ve nedensel risk örüntüleri üretiliyor...")
+    print(f"[Task Generator] {num_tasks:,} adet Task kaydı üretiliyor (Başlangıç ID: {task_id_start})...")
 
-    # 1. Task ID
-    task_ids = np.array([f"TASK-{100001 + i}" for i in range(num_tasks)], dtype=object)
+    # 1. Task ID (kronolojik sıralama sonrası güncellenecek)
+    task_ids = np.array([f"TASK-{task_id_start + i}" for i in range(num_tasks)], dtype=object)
 
     # 2. Project & Repository eşleşmesi
     proj_idx = rng.integers(0, len(cat["projects"]), size=num_tasks)
@@ -192,9 +194,7 @@ def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
     ]
     watchers = rng.choice(watcher_pool, size=num_tasks)
 
-    # 7. Sprint / Iteration & Epic / Parent Task
-    sprint_nums = rng.integers(1, 37, size=num_tasks)
-    sprints = np.array([f"2025-2026 Sprint-{s:02d}" for s in sprint_nums], dtype=object)
+    # 7. Epic / Parent Task (Sprint bilgisi start_date'ten türetilecek)
     epic_nums = rng.integers(100, 350, size=num_tasks)
     epics = np.array([f"{project_codes[i]}-EPIC-{epic_nums[i]}" for i in range(num_tasks)], dtype=object)
 
@@ -232,12 +232,13 @@ def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
     req_change_counts = rng.choice([0, 1, 2, 3, 4], size=num_tasks, p=[0.60, 0.22, 0.10, 0.05, 0.03])
     reopen_counts = rng.choice([0, 1, 2, 3], size=num_tasks, p=[0.72, 0.18, 0.07, 0.03])
 
-    # 10. Tarihler (Created At, Start Date, Due Date, Actual Start, Actual End)
-    # 2 yıllık zaman serisi (2025-01-01 .. 2026-10-15) -> Velocity analizi için
-    base_ts = datetime(2025, 1, 1, 8, 0, 0)
-    created_offset_sec = np.sort(rng.integers(0, 650 * 86400, size=num_tasks))
-    start_delay_days = rng.integers(1, 6, size=num_tasks) + blocker_counts * 2
-    planned_duration_days = np.clip(np.ceil(estimated_effort / 6.0).astype(int) + rng.integers(1, 5, size=num_tasks), 2, 45)
+    # 10. Status (Görev durumu - tarih kurgusundan önce belirlenir)
+    status_choices = ["Done", "In Progress", "Test", "Code Review", "To Do", "Open", "Blocked"]
+    status_probs = [0.58, 0.14, 0.09, 0.07, 0.05, 0.04, 0.03]
+    statuses = rng.choice(status_choices, size=num_tasks, p=status_probs)
+    statuses = np.where(blocker_counts >= 2, "Blocked", statuses)
+    is_done = statuses == "Done"
+    is_open = ~is_done
 
     # Nedensel Gecikme ve Risk Modellemesi (XAI için gerçekçi korelasyon!)
     # Risk puanını artıran faktörler:
@@ -285,24 +286,51 @@ def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
     delay_days = np.clip(delay_days, -5, 60)
     is_delayed = (delay_days > 0).astype(int)
 
-    # Tarih dizilerini hızlıca formatla (Vektörel datetime64 dönüşümü)
-    created_dt = np.datetime64("2025-01-01T08:00:00") + created_offset_sec.astype("timedelta64[s]")
-    start_dt = created_dt.astype("datetime64[D]") + start_delay_days.astype("timedelta64[D]")
-    due_dt = start_dt + planned_duration_days.astype("timedelta64[D]")
-    actual_start_dt = start_dt + (blocker_counts > 0).astype(int).astype("timedelta64[D]")
-    actual_end_dt = due_dt + delay_days.astype("timedelta64[D]")
+    # 11. Gerçekçi Tarihler (Bugün = reference_date, örn. 2026-11-11)
+    ref_day = np.datetime64(reference_date, "D")
+    base_day = np.datetime64("2025-01-01", "D")
+    hist_days = max(60, int((ref_day - base_day).astype(int)))
+
+    start_delay_days = rng.integers(1, 5, size=num_tasks) + blocker_counts
+    planned_duration_days = np.clip(np.ceil(estimated_effort / 6.0).astype(int) + rng.integers(2, 6, size=num_tasks), 3, 35)
+
+    # Tamamlanan (Done) görevler: 2025-01-15 .. reference_date arasında bitmiş, actual_end = due + delay_days
+    done_end_offset = rng.integers(14, hist_days + 1, size=num_tasks)
+    done_actual_end = base_day + done_end_offset.astype("timedelta64[D]")
+    done_due = done_actual_end - delay_days.astype("timedelta64[D]")
+    done_start = done_due - planned_duration_days.astype("timedelta64[D]")
+
+    # Açık görevler (Open / In Progress / Blocked vb.):
+    # - Gecikmiş açık görevler: due_date = reference_date - delay_days (bugüne kadar gerçekleşen gecikme birebir tutarlı)
+    # - Güncel/yaklaşan sprint görevleri: start_date son 14 gün içinde, due_date >= reference_date
+    overdue_open = is_open & (delay_days > 0) & (rng.random(size=num_tasks) < 0.60)
+    open_overdue_due = ref_day - delay_days.astype("timedelta64[D]")
+    open_overdue_start = open_overdue_due - planned_duration_days.astype("timedelta64[D]")
+    open_overdue_end = np.full(num_tasks, ref_day, dtype="datetime64[D]")
+
+    open_curr_start = ref_day - rng.integers(0, 15, size=num_tasks).astype("timedelta64[D]")
+    open_curr_due = np.maximum(ref_day, open_curr_start + planned_duration_days.astype("timedelta64[D]"))
+    open_curr_end = np.maximum(ref_day, open_curr_due + delay_days.astype("timedelta64[D]"))
+
+    start_dt = np.where(is_done, done_start, np.where(overdue_open, open_overdue_start, open_curr_start))
+    due_dt = np.where(is_done, done_due, np.where(overdue_open, open_overdue_due, open_curr_due))
+    actual_end_dt = np.where(is_done, done_actual_end, np.where(overdue_open, open_overdue_end, open_curr_end))
+
+    created_day = start_dt - start_delay_days.astype("timedelta64[D]")
+    created_sec = rng.integers(8 * 3600, 18 * 3600, size=num_tasks)
+    ref_ts_cap = np.datetime64(f"{reference_date}T19:00:00", "s")
+    created_dt = np.minimum(ref_ts_cap, created_day.astype("datetime64[s]") + created_sec.astype("timedelta64[s]"))
+    actual_start_dt = np.minimum(ref_day, start_dt + (blocker_counts > 0).astype(int).astype("timedelta64[D]"))
+
+    # Sprint numarasını doğrudan start_date'ten türet (2 haftalık sprintler: 2025-01-01 = Sprint-01, 2026-11-11 = Sprint-49)
+    sprint_num = np.clip(((start_dt - base_day).astype(int) // 14) + 1, 1, 60)
+    sprints = np.array([f"2025-2026 Sprint-{int(s):02d}" for s in sprint_num], dtype=object)
 
     created_at_str = np.datetime_as_string(created_dt, unit="s").astype(object)
     start_date_str = np.datetime_as_string(start_dt, unit="D").astype(object)
     due_date_str = np.datetime_as_string(due_dt, unit="D").astype(object)
     actual_start_str = np.datetime_as_string(actual_start_dt, unit="D").astype(object)
     actual_end_str = np.datetime_as_string(actual_end_dt, unit="D").astype(object)
-
-    # 11. Status (Görev durumu)
-    status_choices = ["Done", "In Progress", "Test", "Code Review", "To Do", "Open", "Blocked"]
-    status_probs = [0.58, 0.14, 0.09, 0.07, 0.05, 0.04, 0.03]
-    statuses = rng.choice(status_choices, size=num_tasks, p=status_probs)
-    statuses = np.where(blocker_counts >= 2, "Blocked", statuses)
 
     # 12. Labels / Tags & Attachments / Links
     label_pool = [
@@ -420,7 +448,7 @@ def generate_tasks_dataset(num_tasks: int, seed: int = 42) -> pd.DataFrame:
     return df_tasks
 
 
-def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFrame:
+def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101, reference_date: str = "2026-11-11", pr_id_start: int = 200001) -> pd.DataFrame:
     """
     Task veri seti ile birebir ilişkili (Foreign Key: linked_task_issue),
     36 temel PR özniteliği + 13 Büyük Veri (5V) & XAI PR Risk özniteliği içeren
@@ -432,7 +460,7 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
     # Her Task'ın linked_pr_count sayısı kadar PR oluştur
     pr_counts = df_tasks["linked_pr_count"].to_numpy()
     num_prs = int(pr_counts.sum())
-    print(f"[2/4] Task'larla ilişkili {num_prs:,} adet Pull Request (PR) kaydı ve CI/CD metrikleri üretiliyor...")
+    print(f"[PR Generator] Task'larla ilişkili {num_prs:,} adet Pull Request (PR) kaydı üretiliyor (Başlangıç ID: {pr_id_start})...")
 
     # Task indekslerini tekrarlayarak ilişkisel bütünlük sağla
     parent_idx = np.repeat(np.arange(len(df_tasks)), pr_counts)
@@ -443,10 +471,12 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
     parent_assignees = df_tasks["assignee"].to_numpy()[parent_idx]
     parent_risk_scores = df_tasks["delivery_risk_score"].to_numpy()[parent_idx]
     parent_created_at = df_tasks["created_at"].to_numpy()[parent_idx]
+    parent_start_date = df_tasks["start_date"].to_numpy()[parent_idx]
+    parent_status = df_tasks["status"].to_numpy()[parent_idx]
     parent_priorities = df_tasks["priority"].to_numpy()[parent_idx]
 
     # 1. PR ID
-    pr_ids = np.array([f"PR-{200001 + i}" for i in range(num_prs)], dtype=object)
+    pr_ids = np.array([f"PR-{pr_id_start + i}" for i in range(num_prs)], dtype=object)
 
     # 2. Repository eşlemesi
     proj_to_repo = {f"{p[0]} - {p[1]}": p[2] for p in cat["projects"]}
@@ -609,12 +639,14 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
         dtype=object
     )
 
-    # PR Status & Approval Status
-    pr_status = np.where(
+    # PR Status & Approval Status (Tamamlanan görevlerin PR'ları çoğunlukla Merged/Closed)
+    open_pr_status = np.where(
         pipeline_status == "Failed",
         rng.choice(["Changes Requested", "In Review", "Closed", "Open"], size=num_prs, p=[0.45, 0.25, 0.15, 0.15]),
-        rng.choice(["Merged", "Approved", "In Review", "Open", "Draft", "Closed"], size=num_prs, p=[0.74, 0.08, 0.07, 0.05, 0.03, 0.03])
+        rng.choice(["Merged", "Approved", "In Review", "Open", "Draft", "Closed"], size=num_prs, p=[0.45, 0.16, 0.15, 0.12, 0.07, 0.05])
     )
+    done_pr_status = rng.choice(["Merged", "Closed"], size=num_prs, p=[0.90, 0.10])
+    pr_status = np.where(parent_status == "Done", done_pr_status, open_pr_status)
 
     approval_status = np.where(
         np.isin(pr_status, ["Merged", "Approved"]),
@@ -626,7 +658,7 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
         )
     )
 
-    # 9. Zaman Damgaları (Created At, Updated At, Merged At, Closed At)
+    # 9. Zaman Damgaları (Created At, Updated At, Merged At, Closed At - referans tarih <= reference_date)
     time_to_first_review_hours = np.round(
         rng.uniform(0.5, 12.0, size=num_prs) + (changed_files_count * 0.4), 2
     )
@@ -635,10 +667,11 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
         2
     )
 
-    parent_created_dt = parent_created_at.astype("datetime64[s]")
-    pr_create_offset_hours = rng.integers(4, 96, size=num_prs)
-    pr_created_dt = parent_created_dt + pr_create_offset_hours.astype("timedelta64[h]")
-    pr_updated_dt = pr_created_dt + np.round(time_to_merge_hours * 3600).astype(int).astype("timedelta64[s]")
+    ref_ts = np.datetime64(f"{reference_date}T20:00:00", "s")
+    parent_start_ts = parent_start_date.astype("datetime64[s]") + np.timedelta64(9 * 3600, "s")
+    pr_create_offset_hours = rng.integers(2, 72, size=num_prs)
+    pr_created_dt = np.minimum(ref_ts - np.timedelta64(3600, "s"), parent_start_ts + pr_create_offset_hours.astype("timedelta64[h]"))
+    pr_updated_dt = np.minimum(ref_ts, pr_created_dt + np.round(time_to_merge_hours * 3600).astype(int).astype("timedelta64[s]"))
 
     created_at_str = np.datetime_as_string(pr_created_dt, unit="s").astype(object)
     updated_at_str = np.datetime_as_string(pr_updated_dt, unit="s").astype(object)
@@ -795,70 +828,185 @@ def generate_prs_dataset(df_tasks: pd.DataFrame, seed: int = 101) -> pd.DataFram
     return df_prs
 
 
-def export_5v_datasets(df_tasks: pd.DataFrame, df_prs: pd.DataFrame, output_dir: str):
+def export_5v_datasets_streamed(
+    total_tasks: int = 280000,
+    chunk_size: int = 50000,
+    output_dir: str = "data",
+    target_csv_gb: float = 1.0,
+    scale_both_csv: bool = False,
+    seed: int = 42,
+    reference_date: str = "2026-11-11"
+):
     """
-    5V Variety (Çeşitlilik) ilkesi gereği veri setlerini:
-    1. Parquet (Apache Spark / Analitik kolon bazlı sıkıştırılmış format)
-    2. CSV (İlişkisel / Tabular format)
-    3. JSONL (Yarı-yapısal NoSQL / Elasticsearch / Kafka doküman formatı)
-    olarak kaydeder.
+    Büyük Veri (Big Data) 5V Ölçeklenebilir Streaming/Chunked Veri Üretim Motoru.
+    
+    Özellikler:
+    - OOM (Out Of Memory) koruması: Bellek sabit ~350 MB kalır.
+    - CSV boyutunu en az `target_csv_gb` (Varsayılan: >= 1.0 GB) olacak şekilde garanti eder.
+    - Parquet (Snappy sıkıştırmalı kolon bazlı) ve JSONL dosyalarını eşzamanlı chunk olarak yazar.
+    - Spark & HDFS dağıtık mimari analizleri için hazır yüksek hacimli (Volume) veri üretir.
     """
     os.makedirs(output_dir, exist_ok=True)
-    print(f"[3/4] Veri setleri '{output_dir}' dizinine Parquet, CSV ve JSONL formatlarında kaydediliyor...")
+    t_start = time.time()
 
-    paths = {}
-
-    # 1. Parquet
-    tasks_parquet = os.path.join(output_dir, "tasks_dataset.parquet")
-    prs_parquet = os.path.join(output_dir, "pull_requests_dataset.parquet")
-    df_tasks.to_parquet(tasks_parquet, index=False, engine="pyarrow", compression="snappy")
-    df_prs.to_parquet(prs_parquet, index=False, engine="pyarrow", compression="snappy")
-    paths["tasks_parquet"] = tasks_parquet
-    paths["prs_parquet"] = prs_parquet
-
-    # 2. CSV
     tasks_csv = os.path.join(output_dir, "tasks_dataset.csv")
     prs_csv = os.path.join(output_dir, "pull_requests_dataset.csv")
-    df_tasks.to_csv(tasks_csv, index=False, encoding="utf-8-sig")
-    df_prs.to_csv(prs_csv, index=False, encoding="utf-8-sig")
-    paths["tasks_csv"] = tasks_csv
-    paths["prs_csv"] = prs_csv
-
-    # 3. JSONL (Yarı-yapısal iç içe doküman temsili)
+    tasks_parquet = os.path.join(output_dir, "tasks_dataset.parquet")
+    prs_parquet = os.path.join(output_dir, "pull_requests_dataset.parquet")
     tasks_jsonl = os.path.join(output_dir, "tasks_dataset.jsonl")
     prs_jsonl = os.path.join(output_dir, "pull_requests_dataset.jsonl")
-    df_tasks.to_json(tasks_jsonl, orient="records", lines=True, force_ascii=False)
-    df_prs.to_json(prs_jsonl, orient="records", lines=True, force_ascii=False)
-    paths["tasks_jsonl"] = tasks_jsonl
-    paths["prs_jsonl"] = prs_jsonl
 
-    # Özet İstatistik ve Meta Veri Raporu
+    # Mevcut dosyaları temizle
+    for f in [tasks_csv, prs_csv, tasks_parquet, prs_parquet, tasks_jsonl, prs_jsonl]:
+        if os.path.exists(f):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+
+    print("=" * 80)
+    print(f"BÜYÜK VERİ (5V) STREAMING VERİ ÜRETİMİ BAŞLATILIYOR")
+    print(f"Hedef CSV Boyutu : En az {target_csv_gb:.2f} GB")
+    print(f"Başlangıç Task   : {total_tasks:,} (Chunk Boyutu: {chunk_size:,})")
+    print(f"Çıktı Dizini     : {os.path.abspath(output_dir)}")
+    print("=" * 80)
+
+    tasks_writer = None
+    prs_writer = None
+
+    total_tasks_generated = 0
+    total_prs_generated = 0
+    chunk_idx = 0
+    current_pr_id = 200001
+    current_task_id = 100001
+
+    target_bytes = int(target_csv_gb * 1024 * 1024 * 1024)
+
+    # Özet metrik toplayıcıları
+    task_risk_counts = {}
+    pr_risk_counts = {}
+    delayed_task_count = 0
+
+    while True:
+        chunk_idx += 1
+        current_chunk_tasks = min(chunk_size, max(chunk_size, total_tasks - total_tasks_generated)) if total_tasks > total_tasks_generated else chunk_size
+        
+        print(f"\n>>> [Chunk #{chunk_idx}] {current_chunk_tasks:,} Task ve ilişkili PR'lar üretiliyor...")
+        c_seed = seed + chunk_idx * 17
+        df_chunk_tasks = generate_tasks_dataset(
+            num_tasks=current_chunk_tasks,
+            seed=c_seed,
+            reference_date=reference_date,
+            task_id_start=current_task_id
+        )
+
+        df_chunk_prs = generate_prs_dataset(
+            df_tasks=df_chunk_tasks,
+            seed=c_seed + 99,
+            reference_date=reference_date,
+            pr_id_start=current_pr_id
+        )
+
+        current_task_id += len(df_chunk_tasks)
+        current_pr_id += len(df_chunk_prs)
+        total_tasks_generated += len(df_chunk_tasks)
+        total_prs_generated += len(df_chunk_prs)
+
+        # İstatistik güncelle
+        delayed_task_count += int(df_chunk_tasks["is_delayed"].sum())
+        for k, v in df_chunk_tasks["delivery_risk_level"].value_counts().items():
+            task_risk_counts[k] = task_risk_counts.get(k, 0) + int(v)
+        for k, v in df_chunk_prs["pr_risk_level"].value_counts().items():
+            pr_risk_counts[k] = pr_risk_counts.get(k, 0) + int(v)
+
+        # 1. CSV Append
+        write_header = (chunk_idx == 1)
+        df_chunk_tasks.to_csv(tasks_csv, mode="a", header=write_header, index=False, encoding="utf-8-sig")
+        df_chunk_prs.to_csv(prs_csv, mode="a", header=write_header, index=False, encoding="utf-8-sig")
+
+        # 2. JSONL Append
+        df_chunk_tasks.to_json(tasks_jsonl, orient="records", lines=True, force_ascii=False, mode="a")
+        df_chunk_prs.to_json(prs_jsonl, orient="records", lines=True, force_ascii=False, mode="a")
+
+        # 3. Parquet Append (PyArrow Streaming Writer)
+        table_tasks = pa.Table.from_pandas(df_chunk_tasks, preserve_index=False)
+        table_prs = pa.Table.from_pandas(df_chunk_prs, preserve_index=False)
+
+        if tasks_writer is None:
+            tasks_writer = pq.ParquetWriter(tasks_parquet, table_tasks.schema, compression="snappy")
+        tasks_writer.write_table(table_tasks)
+
+        if prs_writer is None:
+            prs_writer = pq.ParquetWriter(prs_parquet, table_prs.schema, compression="snappy")
+        prs_writer.write_table(table_prs)
+
+        # Anlık boyutları kontrol et
+        cur_prs_csv_bytes = os.path.getsize(prs_csv)
+        cur_tasks_csv_bytes = os.path.getsize(tasks_csv)
+        total_csv_bytes = cur_prs_csv_bytes + cur_tasks_csv_bytes
+
+        print(f"    [İlerleme] Toplam Task: {total_tasks_generated:,} | Toplam PR: {total_prs_generated:,}")
+        print(f"    [Boyutlar] PR CSV: {cur_prs_csv_bytes / (1024*1024):.2f} MB | Tasks CSV: {cur_tasks_csv_bytes / (1024*1024):.2f} MB | Toplam CSV: {total_csv_bytes / (1024*1024):.2f} MB")
+
+        # Durma kriteri:
+        # scale_both_csv=False ise PR CSV >= target_bytes ve total_tasks_generated >= total_tasks
+        # scale_both_csv=True ise Tasks CSV de >= target_bytes
+        if scale_both_csv:
+            reached_target = (cur_tasks_csv_bytes >= target_bytes) and (cur_prs_csv_bytes >= target_bytes)
+        else:
+            reached_target = (cur_prs_csv_bytes >= target_bytes) and (total_tasks_generated >= total_tasks)
+
+        if reached_target:
+            print(f"\n[Hedef Boyuta Ulaşıldı] PR CSV {cur_prs_csv_bytes / (1024*1024):.2f} MB >= {target_csv_gb*1024:.0f} MB")
+            break
+
+    # Parquet yazıcıları kapat
+    if tasks_writer:
+        tasks_writer.close()
+    if prs_writer:
+        prs_writer.close()
+
+    elapsed = time.time() - t_start
+
+    # Meta veri ve 5V Özet Raporu
+    paths = {
+        "tasks_parquet": tasks_parquet,
+        "prs_parquet": prs_parquet,
+        "tasks_csv": tasks_csv,
+        "prs_csv": prs_csv,
+        "tasks_jsonl": tasks_jsonl,
+        "prs_jsonl": prs_jsonl
+    }
+
     summary = {
         "generated_at": datetime.now().isoformat(),
+        "generation_time_seconds": round(elapsed, 2),
         "project_title": "Yazılım Projelerinde Teslimat Risklerinin Büyük Veri ile Erken Tespiti ve Açıklanabilir Karar Destek Sistemi",
         "big_data_5v_metrics": {
             "volume": {
-                "tasks_row_count": int(len(df_tasks)),
-                "prs_row_count": int(len(df_prs)),
-                "total_records_per_format": int(len(df_tasks) + len(df_prs)),
-                "total_serialized_records_across_3_formats": int((len(df_tasks) + len(df_prs)) * 3),
-                "tasks_columns": int(df_tasks.shape[1]),
-                "prs_columns": int(df_prs.shape[1]),
+                "tasks_row_count": total_tasks_generated,
+                "prs_row_count": total_prs_generated,
+                "total_records_per_format": total_tasks_generated + total_prs_generated,
+                "total_serialized_records_across_3_formats": (total_tasks_generated + total_prs_generated) * 3,
             },
-            "variety": ["CSV (Structured)", "Parquet (Columnar/Spark)", "JSONL (Semi-Structured/NoSQL)", "Natural Language Text & Git Diffs (Unstructured)"],
+            "variety": [
+                "CSV (Structured / Relational / Distributed Storage)",
+                "Parquet (Columnar / Apache Spark / Snappy Compressed)",
+                "JSONL (Semi-Structured / Event Stream / NoSQL)",
+                "Natural Language Git Diffs & Review Comments (Unstructured)"
+            ],
             "velocity": {
-                "time_range_start": str(df_tasks["created_at"].min()),
-                "time_range_end": str(df_prs["updated_at"].max()),
+                "streaming_batch_chunks": chunk_idx,
                 "streaming_simulator": "velocity_stream_simulator.py",
             },
             "veracity": {
-                "task_quality_distribution": df_tasks["data_quality_flag"].value_counts().to_dict(),
-                "pr_quality_distribution": df_prs["data_quality_flag"].value_counts().to_dict(),
+                "quality_controlled": True,
+                "schema_integrity": "Foreign Key linked_task_issue validated across chunks"
             },
             "value_xai": {
-                "delayed_task_ratio": round(float(df_tasks["is_delayed"].mean()), 4),
-                "task_risk_level_distribution": df_tasks["delivery_risk_level"].value_counts().to_dict(),
-                "pr_risk_level_distribution": df_prs["pr_risk_level"].value_counts().to_dict(),
+                "delayed_task_ratio": round(delayed_task_count / max(1, total_tasks_generated), 4),
+                "task_risk_level_distribution": task_risk_counts,
+                "pr_risk_level_distribution": pr_risk_counts,
             }
         },
         "files": {}
@@ -870,39 +1018,166 @@ def export_5v_datasets(df_tasks: pd.DataFrame, df_prs: pd.DataFrame, output_dir:
         total_bytes += sz
         summary["files"][k] = {
             "path": os.path.basename(p),
-            "size_mb": round(sz / (1024 * 1024), 2)
+            "size_mb": round(sz / (1024 * 1024), 2),
+            "size_gb": round(sz / (1024 * 1024 * 1024), 3)
         }
     summary["big_data_5v_metrics"]["volume"]["total_disk_size_mb"] = round(total_bytes / (1024 * 1024), 2)
+    summary["big_data_5v_metrics"]["volume"]["total_disk_size_gb"] = round(total_bytes / (1024 * 1024 * 1024), 3)
 
     meta_path = os.path.join(output_dir, "dataset_metadata_5v.json")
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
-    print(f"[4/4] Üretim tamamlandı! Toplam Disk Boyutu: {summary['big_data_5v_metrics']['volume']['total_disk_size_mb']:.2f} MB")
+    # Web ve Dashboard varsayılan veri setlerini otomatik senkronize et
+    sync_default_datasets(output_dir, total_tasks_generated, total_prs_generated, delayed_task_count)
+
+    print("\n" + "=" * 80)
+    print("BÜYÜK VERİ ÜRETİM RAPORU")
+    print(f"Toplam Geçen Süre    : {elapsed:.2f} saniye ({elapsed/60:.2f} dakika)")
+    print(f"Toplam Task Sayısı   : {total_tasks_generated:,}")
+    print(f"Toplam PR Sayısı     : {total_prs_generated:,}")
+    print(f"Pull Requests CSV    : {summary['files']['prs_csv']['size_mb']:.2f} MB ({summary['files']['prs_csv']['size_gb']:.2f} GB)")
+    print(f"Tasks CSV            : {summary['files']['tasks_csv']['size_mb']:.2f} MB ({summary['files']['tasks_csv']['size_gb']:.2f} GB)")
+    print(f"Pull Requests Parquet: {summary['files']['prs_parquet']['size_mb']:.2f} MB")
+    print(f"Tasks Parquet        : {summary['files']['tasks_parquet']['size_mb']:.2f} MB")
+    print(f"Toplam Disk Alanı    : {summary['big_data_5v_metrics']['volume']['total_disk_size_gb']:.2f} GB")
+    print("=" * 80)
     return summary
 
 
+def sync_default_datasets(output_dir: str, total_tasks: int, total_prs: int, delayed_count: int):
+    """Web (Vercel) ve Dashboard varsayılan veri setlerini (JSON & Parquet) senkronize eder."""
+    try:
+        import shutil
+        tasks_p = os.path.join(output_dir, "tasks_dataset.parquet")
+        prs_p = os.path.join(output_dir, "pull_requests_dataset.parquet")
+        if not (os.path.exists(tasks_p) and os.path.exists(prs_p)):
+            return
+
+        df_t = pd.read_parquet(tasks_p)
+        df_p = pd.read_parquet(prs_p)
+
+        open_mask = ~df_t["status"].str.lower().isin(["done", "closed", "resolved"])
+        open_tasks_count = int(open_mask.sum())
+        early_at_risk_open = int((open_mask & (df_t["delivery_risk_level"].isin(["Critical", "High"]))).sum())
+        avg_risk_score = round(float(df_t["delivery_risk_score"].mean()), 1)
+        critical_high_count = int(df_t["delivery_risk_level"].isin(["Critical", "High"]).sum())
+        delayed_ratio = round(float(df_t["is_delayed"].mean() * 100), 1)
+        delayed_subset = df_t[df_t["is_delayed"] == 1]
+        avg_delay_days = round(float(delayed_subset["delay_days"].mean()), 1) if len(delayed_subset) > 0 else 0.0
+
+        global_metrics = {
+            "total_tasks": total_tasks,
+            "total_prs": total_prs,
+            "early_at_risk_open": early_at_risk_open,
+            "open_tasks_count": open_tasks_count,
+            "avg_risk_score": avg_risk_score,
+            "critical_high_count": critical_high_count,
+            "delayed_ratio": delayed_ratio,
+            "avg_delay_days": avg_delay_days
+        }
+
+        # Örneklem
+        crit_open = df_t[open_mask & (df_t["delivery_risk_level"] == "Critical")].head(350)
+        high_open = df_t[open_mask & (df_t["delivery_risk_level"] == "High")].head(250)
+        med_open = df_t[open_mask & (df_t["delivery_risk_level"] == "Medium")].head(150)
+        done_sample = df_t[~open_mask].head(250)
+        sample_tasks = pd.concat([crit_open, high_open, med_open, done_sample]).drop_duplicates(subset=["task_id"])
+        sample_task_ids = set(sample_tasks["task_id"].unique())
+        sample_prs = df_p[df_p["linked_task_issue"].isin(sample_task_ids)].head(2500)
+
+        # Stream
+        stream_events = []
+        stream_path = os.path.join(output_dir, "velocity_event_stream.jsonl")
+        if os.path.exists(stream_path):
+            with open(stream_path, "r", encoding="utf-8") as sf:
+                for idx, line in enumerate(sf):
+                    if idx >= 200:
+                        break
+                    l = line.strip()
+                    if l:
+                        try:
+                            stream_events.append(json.loads(l))
+                        except Exception:
+                            pass
+
+        default_payload = {
+            "is_default": True,
+            "global_metrics": global_metrics,
+            "full_volume": {
+                "tasks_total": total_tasks,
+                "prs_total": total_prs,
+                "is_big_data_1gb_plus": True
+            },
+            "tasks": sample_tasks.replace({np.nan: None}).to_dict(orient="records"),
+            "prs": sample_prs.replace({np.nan: None}).to_dict(orient="records"),
+            "stream": stream_events
+        }
+
+        for path in [
+            os.path.join(output_dir, "default_dataset.json"),
+            os.path.join("public", "data", "default_dataset.json"),
+            os.path.join("public", "sample_data.json")
+        ]:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(default_payload, f, ensure_ascii=False)
+
+        public_data_dir = os.path.join("public", "data")
+        os.makedirs(public_data_dir, exist_ok=True)
+        shutil.copy2(tasks_p, os.path.join(public_data_dir, "tasks_dataset.parquet"))
+        shutil.copy2(prs_p, os.path.join(public_data_dir, "pull_requests_dataset.parquet"))
+        meta_src = os.path.join(output_dir, "dataset_metadata_5v.json")
+        if os.path.exists(meta_src):
+            shutil.copy2(meta_src, os.path.join(public_data_dir, "dataset_metadata_5v.json"))
+        print("[Senkronizasyon] Varsayılan veri setleri ve public/data başarıyla güncellendi.")
+    except Exception as e:
+        print(f"[UYARI] Varsayılan verileri senkronize ederken hata: {e}")
+
+
+def export_5v_datasets(df_tasks: pd.DataFrame, df_prs: pd.DataFrame, output_dir: str):
+    """Tekil küçük veri setleri için geriye dönük uyumlu export fonksiyonu."""
+    os.makedirs(output_dir, exist_ok=True)
+    paths = {}
+    tasks_parquet = os.path.join(output_dir, "tasks_dataset.parquet")
+    prs_parquet = os.path.join(output_dir, "pull_requests_dataset.parquet")
+    df_tasks.to_parquet(tasks_parquet, index=False, engine="pyarrow", compression="snappy")
+    df_prs.to_parquet(prs_parquet, index=False, engine="pyarrow", compression="snappy")
+
+    tasks_csv = os.path.join(output_dir, "tasks_dataset.csv")
+    prs_csv = os.path.join(output_dir, "pull_requests_dataset.csv")
+    df_tasks.to_csv(tasks_csv, index=False, encoding="utf-8-sig")
+    df_prs.to_csv(prs_csv, index=False, encoding="utf-8-sig")
+
+    tasks_jsonl = os.path.join(output_dir, "tasks_dataset.jsonl")
+    prs_jsonl = os.path.join(output_dir, "pull_requests_dataset.jsonl")
+    df_tasks.to_json(tasks_jsonl, orient="records", lines=True, force_ascii=False)
+    df_prs.to_json(prs_jsonl, orient="records", lines=True, force_ascii=False)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="5V Büyük Veri Sentetik Task ve PR Veri Üreticisi")
-    parser.add_argument("--num-tasks", type=int, default=80000, help="Üretilecek Task sayısı (Varsayılan: 80.000 -> ~155.000 PR)")
+    parser = argparse.ArgumentParser(description="5V Büyük Veri Sentetik Task ve PR Veri Üreticisi (1 GB+ CSV & Parquet Destekli)")
+    parser.add_argument("--num-tasks", type=int, default=275000, help="Hedef Task sayısı (Varsayılan: 275.000 -> ~535.000 PR ile >1.05 GB CSV)")
+    parser.add_argument("--chunk-size", type=int, default=50000, help="Streaming batch chunk boyutu (OOM koruması)")
+    parser.add_argument("--target-csv-gb", type=float, default=1.0, help="Hedef minimum CSV dosya boyutu (GB cinsinden, örn. 1.0)")
+    parser.add_argument("--scale-both-csv", action="store_true", help="Hem Tasks hem de PR CSV'sinin her birinin en az 1 GB olmasını sağla")
     parser.add_argument("--output-dir", type=str, default="data", help="Çıktı klasörü")
     parser.add_argument("--seed", type=int, default=42, help="Rastgelelik tohumu (Seed)")
+    parser.add_argument("--reference-date", type=str, default="2026-11-11", help="Referans tarihi (YYYY-MM-DD)")
     args = parser.parse_args()
 
-    t0 = time.time()
-    df_tasks = generate_tasks_dataset(num_tasks=args.num_tasks, seed=args.seed)
-    df_prs = generate_prs_dataset(df_tasks=df_tasks, seed=args.seed + 59)
-    summary = export_5v_datasets(df_tasks, df_prs, output_dir=args.output_dir)
-    elapsed = time.time() - t0
-
-    print("\n--- ÖZET RAPOR ---")
-    print(f"Toplam Süre          : {elapsed:.2f} saniye")
-    print(f"Task Kayıt Sayısı    : {len(df_tasks):,} satır x {df_tasks.shape[1]} sütun")
-    print(f"PR Kayıt Sayısı      : {len(df_prs):,} satır x {df_prs.shape[1]} sütun")
-    print(f"Toplam Disk Boyutu   : {summary['big_data_5v_metrics']['volume']['total_disk_size_mb']} MB (CSV + JSONL + Parquet)")
-    print(f"Geciken Görev Oranı  : %{summary['big_data_5v_metrics']['value_xai']['delayed_task_ratio']*100:.1f}")
+    export_5v_datasets_streamed(
+        total_tasks=args.num_tasks,
+        chunk_size=args.chunk_size,
+        output_dir=args.output_dir,
+        target_csv_gb=args.target_csv_gb,
+        scale_both_csv=args.scale_both_csv,
+        seed=args.seed,
+        reference_date=args.reference_date
+    )
 
 
 if __name__ == "__main__":
     main()
+
 

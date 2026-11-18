@@ -1,82 +1,76 @@
 {
-  "generated_at": "2026-10-30T16:05:17.697997",
+  "generated_at": "2026-11-17T21:45:16.375252",
+  "generation_time_seconds": 105.33,
   "project_title": "Yazılım Projelerinde Teslimat Risklerinin Büyük Veri ile Erken Tespiti ve Açıklanabilir Karar Destek Sistemi",
   "big_data_5v_metrics": {
     "volume": {
-      "tasks_row_count": 80000,
-      "prs_row_count": 151105,
-      "total_records_per_format": 231105,
-      "total_serialized_records_across_3_formats": 693315,
-      "tasks_columns": 38,
-      "prs_columns": 49,
-      "total_disk_size_mb": 1000.4
+      "tasks_row_count": 300000,
+      "prs_row_count": 567195,
+      "total_records_per_format": 867195,
+      "total_serialized_records_across_3_formats": 2601585,
+      "total_disk_size_mb": 3755.88,
+      "total_disk_size_gb": 3.668
     },
     "variety": [
-      "CSV (Structured)",
-      "Parquet (Columnar/Spark)",
-      "JSONL (Semi-Structured/NoSQL)",
-      "Natural Language Text & Git Diffs (Unstructured)"
+      "CSV (Structured / Relational / Distributed Storage)",
+      "Parquet (Columnar / Apache Spark / Snappy Compressed)",
+      "JSONL (Semi-Structured / Event Stream / NoSQL)",
+      "Natural Language Git Diffs & Review Comments (Unstructured)"
     ],
     "velocity": {
-      "time_range_start": "2025-01-01T08:04:21",
-      "time_range_end": "2026-10-21T03:44:45",
+      "streaming_batch_chunks": 6,
       "streaming_simulator": "velocity_stream_simulator.py"
     },
     "veracity": {
-      "task_quality_distribution": {
-        "Clean": 73677,
-        "Missing_Estimate": 2027,
-        "Outlier_Effort": 1568,
-        "Incomplete_Metadata": 1567,
-        "Clock_Skew_Corrected": 1161
-      },
-      "pr_quality_distribution": {
-        "Clean": 140629,
-        "Outlier_Diff_Size": 4444,
-        "Missing_Doc_Link": 3074,
-        "Clock_Skew_Anomaly": 2958
-      }
+      "quality_controlled": true,
+      "schema_integrity": "Foreign Key linked_task_issue validated across chunks"
     },
     "value_xai": {
-      "delayed_task_ratio": 0.6108,
+      "delayed_task_ratio": 0.6112,
       "task_risk_level_distribution": {
-        "Medium": 26097,
-        "High": 24703,
-        "Critical": 15745,
-        "Low": 13455
+        "Medium": 97314,
+        "High": 92852,
+        "Critical": 59236,
+        "Low": 50598
       },
       "pr_risk_level_distribution": {
-        "Critical": 66397,
-        "Medium": 39205,
-        "High": 26855,
-        "Low": 18648
+        "Critical": 251046,
+        "Medium": 146849,
+        "High": 99954,
+        "Low": 69346
       }
     }
   },
   "files": {
     "tasks_parquet": {
       "path": "tasks_dataset.parquet",
-      "size_mb": 4.85
+      "size_mb": 19.49,
+      "size_gb": 0.019
     },
     "prs_parquet": {
       "path": "pull_requests_dataset.parquet",
-      "size_mb": 19.75
+      "size_mb": 72.76,
+      "size_gb": 0.071
     },
     "tasks_csv": {
       "path": "tasks_dataset.csv",
-      "size_mb": 95.79
+      "size_mb": 359.2,
+      "size_gb": 0.351
     },
     "prs_csv": {
       "path": "pull_requests_dataset.csv",
-      "size_mb": 297.53
+      "size_mb": 1117.71,
+      "size_gb": 1.092
     },
     "tasks_jsonl": {
       "path": "tasks_dataset.jsonl",
-      "size_mb": 149.87
+      "size_mb": 561.99,
+      "size_gb": 0.549
     },
     "prs_jsonl": {
       "path": "pull_requests_dataset.jsonl",
-      "size_mb": 432.61
+      "size_mb": 1624.74,
+      "size_gb": 1.587
     }
   }
 }

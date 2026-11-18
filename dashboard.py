@@ -15,6 +15,7 @@ import altair as alt  # type: ignore # pyrefly: ignore[missing-import]
 import numpy as np  # type: ignore # pyrefly: ignore[missing-import]
 import pandas as pd  # type: ignore # pyrefly: ignore[missing-import]
 import streamlit as st  # type: ignore # pyrefly: ignore[missing-import]
+import streamlit.components.v1 as components  # type: ignore # pyrefly: ignore[missing-import]
 from sklearn.ensemble import RandomForestClassifier  # type: ignore # pyrefly: ignore[missing-import]
 from sklearn.metrics import (  # type: ignore # pyrefly: ignore[missing-import]
     accuracy_score,
@@ -38,8 +39,62 @@ st.set_page_config(
 
 CUSTOM_CSS = """
 <style>
-    .block-container {
-        padding-top: 1.5rem;
+    [data-testid="stStatusWidget"],
+    [data-testid="stAppDeployButton"],
+    .stDeployButton,
+    [data-testid="stMainMenu"],
+    #MainMenu {
+        display: none !important;
+        visibility: hidden !important;
+    }
+    
+    /* SOL MENÜ (SIDEBAR) VE AÇMA KONTROLÜ GARANTİSİ */
+    section[data-testid="stSidebar"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        background-color: #0f172a !important;
+        border-right: 1px solid #1e293b !important;
+        z-index: 1000000 !important;
+    }
+    
+    /* Sol menü kapalıysa açma butonunu sol üstte her zaman parlak ve tıklanabilir göster */
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        z-index: 1000002 !important;
+        position: fixed !important;
+        top: 0.65rem !important;
+        left: 0.65rem !important;
+        background: #1e293b !important;
+        border: 1.5px solid #3b82f6 !important;
+        border-radius: 0.5rem !important;
+        padding: 0.35rem 0.55rem !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+        color: #f8fafc !important;
+        cursor: pointer !important;
+    }
+    [data-testid="stSidebarCollapsedControl"]:hover,
+    [data-testid="collapsedControl"]:hover {
+        background: #2563eb !important;
+        border-color: #60a5fa !important;
+    }
+    [data-testid="stSidebarCollapsedControl"] svg,
+    [data-testid="collapsedControl"] svg {
+        fill: #38bdf8 !important;
+        stroke: #38bdf8 !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(15, 23, 42, 0.4) !important;
+        backdrop-filter: blur(8px) !important;
+        z-index: 99999 !important;
+    }
+    .block-container,
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 3.5rem !important;
         padding-bottom: 2rem;
         max-width: 1550px;
     }
@@ -347,8 +402,19 @@ def ensure_pr_risk_and_xai_columns(df_prs: pd.DataFrame) -> pd.DataFrame:
     return df_prs
 
 
+def get_data_signature(data_dir: str = "data") -> str:
+    """Veri dosyalarının boyut ve zaman damgasını alarak cache'i dosya değişimine duyarlı kılar."""
+    resolved_dir = data_dir if os.path.isdir(data_dir) else os.path.join(BASE_DIR, "data")
+    sigs = []
+    for f in ["tasks_dataset.parquet", "pull_requests_dataset.parquet", "tasks_dataset.csv", "pull_requests_dataset.csv"]:
+        p = os.path.join(resolved_dir, f)
+        if os.path.exists(p):
+            sigs.append(f"{f}:{os.path.getsize(p)}:{int(os.path.getmtime(p))}")
+    return ";".join(sigs) if sigs else "v1"
+
+
 @st.cache_data(show_spinner=False)
-def load_default_datasets(data_dir: str = "data") -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], dict]:
+def load_default_datasets(data_dir: str = "data", cache_sig: str = "") -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], dict]:
     tasks_df, prs_df, meta = None, None, {}
 
     # Olası tüm veri dizini konumlarını tara
@@ -636,10 +702,62 @@ def format_risk_badge(level: str) -> str:
     return f'<span class="{cls}">{level}</span>'
 
 
+def filter_and_sort_explorer_df(
+    df: pd.DataFrame,
+    search_text: str,
+    search_cols: list,
+    status_filter: str,
+    risk_filter: str,
+    risk_col: str,
+    sort_col: str,
+    sort_asc: bool,
+) -> pd.DataFrame:
+    """Task veya PR veri gezgini tablosunu arama, durum, risk ve sıralamaya göre filtreler."""
+    if df is None or len(df) == 0:
+        return pd.DataFrame()
+    mask = pd.Series(True, index=df.index)
+    if status_filter != "Tümü" and "status" in df.columns:
+        mask &= df["status"].astype(str) == status_filter
+    if risk_filter != "Tümü" and risk_col in df.columns:
+        mask &= df[risk_col].astype(str) == risk_filter
+    if search_text:
+        q_mask = pd.Series(False, index=df.index)
+        for col in search_cols:
+            if col in df.columns:
+                q_mask |= df[col].fillna("").astype(str).str.contains(search_text, case=False, regex=False)
+        mask &= q_mask
+    out = df[mask]
+    if sort_col in out.columns and len(out) > 0:
+        out = out.sort_values(sort_col, ascending=sort_asc, na_position="last")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # ANA UYGULAMA AKIŞI (SADELEŞTİRİLMİŞ LAYOUT)
 # ---------------------------------------------------------------------------
 def main():
+    # Sol menünün tarayıcıda kapalı kalmasını önleyen otomatik açıcı
+    components.html(
+        """
+        <script>
+            function ensureSidebarOpen() {
+                try {
+                    const parentDoc = window.parent.document;
+                    const sidebar = parentDoc.querySelector('section[data-testid="stSidebar"]');
+                    const collapseBtn = parentDoc.querySelector('[data-testid="stSidebarCollapsedControl"] button, [data-testid="collapsedControl"] button');
+                    if (collapseBtn && (!sidebar || sidebar.getAttribute('aria-expanded') === 'false')) {
+                        collapseBtn.click();
+                    }
+                } catch(e) {}
+            }
+            setTimeout(ensureSidebarOpen, 150);
+            setTimeout(ensureSidebarOpen, 500);
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
     st.sidebar.markdown("### 🛡️ Erken Risk & XAI Paneli")
     st.sidebar.caption("Karar Destek ve Filtreleme Merkezi")
 
@@ -656,8 +774,12 @@ def main():
             type=["parquet", "csv", "jsonl", "json"],
             key="sidebar_pr_uploader",
         )
+        if st.button("🔄 Önbelleği Temizle & Yeni Veriyi Yükle", key="btn_clear_cache_expander"):
+            st.cache_data.clear()
+            st.rerun()
 
-    default_tasks, default_prs, _ = load_default_datasets(DEFAULT_DATA_DIR)
+    cur_sig = get_data_signature(DEFAULT_DATA_DIR)
+    default_tasks, default_prs, _ = load_default_datasets(DEFAULT_DATA_DIR, cache_sig=cur_sig)
 
     df_tasks: Optional[pd.DataFrame] = None
     df_prs: Optional[pd.DataFrame] = None
@@ -861,7 +983,7 @@ def main():
     st.markdown("<div style='margin-top: 0.75rem;'></div>", unsafe_allow_html=True)
 
     # ---------------------------------------------------------------------------
-    # SADELEŞTİRİLMİŞ 6 ANA SEKME
+    # 7 ANA SEKME
     # ---------------------------------------------------------------------------
     tabs = st.tabs([
         "📡 1. Erken Uyarı & Genel Bakış",
@@ -870,6 +992,7 @@ def main():
         "🔀 4. PR & Ekip İş Yükü Analizi",
         "🤖 5. Yapay Zeka (XAI) & Veri Kalitesi",
         "📥 6. Aksiyon Planı & Rapor İndir",
+        "🗂️ 7. Tüm Task & PR Veri Gezgini",
     ])
 
     # ===========================================================================
@@ -1111,10 +1234,12 @@ def main():
 
         with r_col:
             st.markdown("##### 📋 Görev Planlama Özeti")
+            end_label = "Gerçekleşen Bitiş" if str(task_row.get("status", "")) == "Done" else "Öngörülen Bitiş"
             st.markdown(
                 f"""
                 - **Sprint Dönemi:** `{task_row.get('sprint_iteration', '-')}`
                 - **Planlanan Tarihler:** `{task_row.get('start_date', '-')}` → `{task_row.get('due_date', '-')}`
+                - **{end_label}:** `{task_row.get('actual_end_date', '-')}` (`{int(task_row.get('delay_days', 0)):+d}` gün sapma)
                 - **Karmaşıklık & Efor:** `{task_row.get('story_points', '-')}` SP | Tahmini: `{task_row.get('estimated_effort_hours', '-')} saat`
                 - **Süreç Engelleri:** `{task_row.get('blocker_count', 0)}` Blocker • `{task_row.get('requirement_change_count', 0)}` Kapsam Değişimi
                 - **Ön Koşul Görevler:** `{task_row.get('dependencies', 'Yok')}`
@@ -1467,6 +1592,268 @@ def main():
 
         st.markdown("##### 📋 Dışa Aktarılacak Aksiyon Planı Önizlemesi (İlk 50 Kayıt)")
         st.dataframe(report_df.head(50), width="stretch", hide_index=True)
+
+    # ===========================================================================
+    # SEKME 7: TÜM TASK & PR VERİ GEZGİNİ
+    # ===========================================================================
+    with tabs[6]:
+        st.markdown("#### 🗂️ Tüm Task & PR Veri Gezgini")
+        st.caption(
+            f"Mevcut filtrelere göre **{len(filtered_tasks):,} Görev (Task)** ve **{len(filtered_prs):,} Pull Request (PR)** kaydını arama, durum/risk filtresi, sıralama ve sayfalama ile tek tek inceleyin."
+        )
+
+        exp_mode = st.radio(
+            "İncelenecek Veri Kümesi",
+            options=["📋 Tüm Görevler (Tasks)", "🔀 Tüm Pull Requestler (PRs)"],
+            horizontal=True,
+            key="exp_mode",
+        )
+        is_task_mode = exp_mode == "📋 Tüm Görevler (Tasks)"
+
+        base_exp_df = filtered_tasks if is_task_mode else filtered_prs
+        status_opts = ["Tümü"] + (
+            sorted(base_exp_df["status"].dropna().astype(str).unique().tolist())
+            if (len(base_exp_df) > 0 and "status" in base_exp_df.columns)
+            else []
+        )
+
+        f_col1, f_col2, f_col3, f_col4 = st.columns([2.2, 1, 1, 1.3])
+        with f_col1:
+            exp_search = st.text_input(
+                "🔎 Ara (ID, Başlık, Sorumlu, Modül, Bağlı Görev, XAI...)",
+                value="",
+                placeholder="Örn: TASK-100005, PR-100012, Auth, Conflict...",
+                key="exp_search",
+            ).strip()
+        with f_col2:
+            exp_status = st.selectbox("Durum", options=status_opts, index=0, key="exp_status")
+        with f_col3:
+            exp_risk = st.selectbox(
+                "Risk Seviyesi",
+                options=["Tümü", "Critical", "High", "Medium", "Low"],
+                index=0,
+                key="exp_risk",
+            )
+        with f_col4:
+            if is_task_mode:
+                task_sort_map = {
+                    "Risk Skoru (Yüksek → Düşük)": ("combined_early_risk_score", False),
+                    "Risk Skoru (Düşük → Yüksek)": ("combined_early_risk_score", True),
+                    "Görev ID (A → Z)": ("task_id", True),
+                    "Gecikme Günü (Yüksek → Düşük)": ("delay_days", False),
+                    "Teslim Tarihi (En Yakın)": ("due_date", True),
+                }
+                exp_sort_label = st.selectbox("Sıralama", options=list(task_sort_map.keys()), key="exp_sort_task")
+                sort_col, sort_asc = task_sort_map[exp_sort_label]
+            else:
+                pr_sort_map = {
+                    "PR Risk Skoru (Yüksek → Düşük)": ("pr_risk_score", False),
+                    "PR Risk Skoru (Düşük → Yüksek)": ("pr_risk_score", True),
+                    "PR ID (A → Z)": ("pr_id", True),
+                    "Değişen Dosya (Çok → Az)": ("changed_files_count", False),
+                    "Merge Süresi (Uzun → Kısa)": ("time_to_merge_hours", False),
+                }
+                exp_sort_label = st.selectbox("Sıralama", options=list(pr_sort_map.keys()), key="exp_sort_pr")
+                sort_col, sort_asc = pr_sort_map[exp_sort_label]
+
+        if is_task_mode:
+            exp_df = filter_and_sort_explorer_df(
+                base_exp_df,
+                search_text=exp_search,
+                search_cols=["task_id", "task_title", "project", "component_module", "assignee", "xai_primary_risk_factors"],
+                status_filter=exp_status,
+                risk_filter=exp_risk,
+                risk_col="delivery_risk_level",
+                sort_col=sort_col,
+                sort_asc=sort_asc,
+            )
+        else:
+            exp_df = filter_and_sort_explorer_df(
+                base_exp_df,
+                search_text=exp_search,
+                search_cols=["pr_id", "pr_title", "linked_task_issue", "merge_conflicts", "pipeline_status", "security_scan_status", "xai_pr_risk_factors"],
+                status_filter=exp_status,
+                risk_filter=exp_risk,
+                risk_col="pr_risk_level",
+                sort_col=sort_col,
+                sort_asc=sort_asc,
+            )
+
+        total_exp = len(exp_df)
+        p_c1, p_c2, p_c3 = st.columns([1, 1, 2.5])
+        with p_c1:
+            page_size = st.selectbox("Sayfa Boyutu", options=[25, 50, 100, 250], index=1, key="exp_page_size")
+        total_pages = max(1, (total_exp + page_size - 1) // page_size)
+        with p_c2:
+            page_num = int(
+                st.number_input("Sayfa No", min_value=1, max_value=total_pages, value=1, step=1, key="exp_page_num")
+            )
+        start_idx = (page_num - 1) * page_size
+        end_idx = min(total_exp, start_idx + page_size)
+        with p_c3:
+            st.markdown(
+                f"<div style='padding-top:1.75rem; color:#94a3b8; font-size:0.85rem;'>"
+                f"Toplam <b style='color:#f8fafc;'>{total_exp:,}</b> kayıt &nbsp;|&nbsp; "
+                f"Sayfa <b style='color:#60a5fa;'>{page_num:,} / {total_pages:,}</b> &nbsp;|&nbsp; "
+                f"Gösterilen: <b>{(start_idx + 1) if total_exp > 0 else 0:,}–{end_idx:,}</b>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        if total_exp == 0:
+            st.info("Arama veya filtre kriterlerinize uyan kayıt bulunamadı.")
+        else:
+            page_df = exp_df.iloc[start_idx:end_idx].copy()
+            if is_task_mode:
+                task_cols = [
+                    ("task_id", "Görev ID"),
+                    ("task_title", "Başlık"),
+                    ("project", "Proje"),
+                    ("component_module", "Modül"),
+                    ("task_type", "Tür"),
+                    ("priority", "Öncelik"),
+                    ("status", "Durum"),
+                    ("assignee", "Sorumlu"),
+                    ("sprint_iteration", "Sprint"),
+                    ("start_date", "Başlangıç"),
+                    ("due_date", "Teslim Tarihi"),
+                    ("story_points", "SP"),
+                    ("estimated_effort_hours", "Tah. Efor (sa)"),
+                    ("actual_effort_hours", "Gerç. Efor (sa)"),
+                    ("delay_days", "Gecikme (Gün)"),
+                    ("blocker_count", "Blocker"),
+                    ("requirement_change_count", "Kapsam Değ."),
+                    ("reopen_count", "Reopen"),
+                    ("linked_pr_count", "PR Sayısı"),
+                    ("combined_early_risk_score", "Erken Risk"),
+                    ("delivery_risk_level", "Risk Sınıfı"),
+                    ("xai_primary_risk_factors", "Neden Riskli? (XAI)"),
+                    ("xai_recommended_actions", "Önerilen Aksiyon"),
+                    ("data_quality_flag", "Veri Kalitesi"),
+                ]
+                avail_cols = [c for c, _ in task_cols if c in page_df.columns]
+                rename_map = {c: lbl for c, lbl in task_cols if c in avail_cols}
+                st.dataframe(page_df[avail_cols].rename(columns=rename_map), width="stretch", hide_index=True)
+
+                st.markdown("##### 🔍 Seçili Görev Tam Detay Kartı")
+                sel_exp_tid = st.selectbox(
+                    "Bu sayfadaki bir görevi tüm detaylarıyla inceleyin:",
+                    options=page_df["task_id"].tolist(),
+                    format_func=lambda tid: f"{tid} — {page_df.loc[page_df['task_id']==tid, 'task_title'].values[0]}",
+                    key="exp_detail_task_sel",
+                )
+                det_row = page_df[page_df["task_id"] == sel_exp_tid].iloc[0]
+                d1, d2 = st.columns([1.3, 1])
+                with d1:
+                    st.markdown(
+                        f"**{det_row['task_id']} — {det_row.get('task_title', '')}** "
+                        f"{format_risk_badge(str(det_row.get('delivery_risk_level', 'Medium')))}",
+                        unsafe_allow_html=True,
+                    )
+                    det_end_label = "Gerçekleşen Bitiş" if str(det_row.get("status", "")) == "Done" else "Öngörülen Bitiş"
+                    st.markdown(
+                        f"- **Proje / Modül:** `{det_row.get('project', '-')}` / `{det_row.get('component_module', '-')}`\n"
+                        f"- **Tür / Öncelik / Ortam:** `{det_row.get('task_type', '-')}` • `{det_row.get('priority', '-')}` • `{det_row.get('environment', '-')}`\n"
+                        f"- **Sorumlu / Durum / Sprint:** `{det_row.get('assignee', '-')}` • `{det_row.get('status', '-')}` • `{det_row.get('sprint_iteration', '-')}`\n"
+                        f"- **Planlanan Tarihler:** `{det_row.get('start_date', '-')}` → `{det_row.get('due_date', '-')}` | **{det_end_label}:** `{det_row.get('actual_end_date', '-')}` (`{int(det_row.get('delay_days', 0)):+d}` gün)\n"
+                        f"- **Efor & Karmaşıklık:** `{det_row.get('story_points', '-')}` SP • Tahmini `{det_row.get('estimated_effort_hours', '-')} sa` • Gerçekleşen `{det_row.get('actual_effort_hours', '-')} sa`\n"
+                        f"- **Engeller & Bağımlılıklar:** `{det_row.get('blocker_count', 0)}` Blocker • `{det_row.get('requirement_change_count', 0)}` Kapsam Değ. • `{det_row.get('reopen_count', 0)}` Reopen • Ön koşul: `{det_row.get('dependencies', 'Yok')}`\n"
+                        f"- **Veri Kalitesi:** `{det_row.get('data_quality_flag', 'Clean')}`"
+                    )
+                    st.markdown(f"**📄 Açıklama:** {det_row.get('description', '-')}")
+                    st.caption(f"**✅ Kabul Kriterleri:** {det_row.get('acceptance_criteria', '-')}")
+                with d2:
+                    st.markdown(
+                        f"<div class='xai-box' style='margin-bottom:0.75rem;'>"
+                        f"<div style='font-weight:700; font-size:0.78rem; color:#fbbf24;'>🧠 XAI Risk Teşhisi ({det_row.get('combined_early_risk_score', 0):.1f}/100)</div>"
+                        f"<div style='font-size:0.88rem; margin-top:0.25rem;'>{det_row.get('xai_primary_risk_factors', '-')}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f"<div class='action-box'>"
+                        f"<div style='font-weight:700; font-size:0.78rem; color:#2dd4bf;'>💡 Önerilen Aksiyon</div>"
+                        f"<div style='font-size:0.88rem; margin-top:0.25rem;'>{det_row.get('xai_recommended_actions', '-')}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                pr_cols = [
+                    ("pr_id", "PR ID"),
+                    ("pr_title", "PR Başlığı"),
+                    ("linked_task_issue", "Bağlı Görev"),
+                    ("status", "Durum"),
+                    ("pr_risk_score", "PR Risk Skoru"),
+                    ("pr_risk_level", "Risk Sınıfı"),
+                    ("merge_conflicts", "Merge Conflict"),
+                    ("pipeline_status", "Pipeline"),
+                    ("ci_failure_count", "CI Hata"),
+                    ("security_scan_status", "Güvenlik Taraması"),
+                    ("changed_files_count", "Değişen Dosya"),
+                    ("lines_added", "+Satır"),
+                    ("lines_deleted", "-Satır"),
+                    ("commit_count", "Commit"),
+                    ("review_iteration_count", "İnceleme Turu"),
+                    ("time_to_first_review_hours", "İlk İnceleme (sa)"),
+                    ("time_to_merge_hours", "Merge Süresi (sa)"),
+                    ("xai_pr_risk_factors", "XAI Risk Nedenleri"),
+                    ("xai_pr_recommended_actions", "XAI PR Önerisi"),
+                    ("data_quality_flag", "Veri Kalitesi"),
+                ]
+                avail_cols = [c for c, _ in pr_cols if c in page_df.columns]
+                rename_map = {c: lbl for c, lbl in pr_cols if c in avail_cols}
+                st.dataframe(page_df[avail_cols].rename(columns=rename_map), width="stretch", hide_index=True)
+
+                st.markdown("##### 🔍 Seçili PR Tam Detay Kartı")
+                sel_exp_prid = st.selectbox(
+                    "Bu sayfadaki bir PR kaydını tüm detaylarıyla inceleyin:",
+                    options=page_df["pr_id"].tolist(),
+                    format_func=lambda pid: f"{pid} — {page_df.loc[page_df['pr_id']==pid, 'pr_title'].values[0]}",
+                    key="exp_detail_pr_sel",
+                )
+                det_pr = page_df[page_df["pr_id"] == sel_exp_prid].iloc[0]
+                linked_tid = str(det_pr.get("linked_task_issue", ""))
+                linked_task_rows = df_combined[df_combined["task_id"] == linked_tid] if linked_tid else pd.DataFrame()
+                linked_task_summary = (
+                    f"`{linked_tid}` — {linked_task_rows.iloc[0].get('task_title', '')} ({linked_task_rows.iloc[0].get('project', '-')}, {linked_task_rows.iloc[0].get('assignee', '-')})"
+                    if len(linked_task_rows) > 0
+                    else f"`{linked_tid or '-'}`"
+                )
+                p1, p2 = st.columns([1.25, 1])
+                with p1:
+                    st.markdown(
+                        f"**{det_pr['pr_id']} — {det_pr.get('pr_title', '')}** "
+                        f"{format_risk_badge(str(det_pr.get('pr_risk_level', 'Medium')))}",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f"- **Bağlı Görev:** {linked_task_summary}\n"
+                        f"- **Durum & Risk:** `{det_pr.get('status', '-')}` • PR Risk Skoru: `{det_pr.get('pr_risk_score', 0):.1f}/100`\n"
+                        f"- **Kod Değişimi:** `{det_pr.get('changed_files_count', 0)}` dosya (`+{det_pr.get('lines_added', 0)}` / `-{det_pr.get('lines_deleted', 0)}`) • `{det_pr.get('commit_count', 0)}` commit\n"
+                        f"- **Merge & Pipeline:** Conflict: `{det_pr.get('merge_conflicts', '-')}` • Pipeline: `{det_pr.get('pipeline_status', '-')}` (`{det_pr.get('ci_failure_count', 0)}` hata)\n"
+                        f"- **Güvenlik & İnceleme:** `{det_pr.get('security_scan_status', '-')}` • `{det_pr.get('review_iteration_count', 0)}` tur • İlk İnceleme `{det_pr.get('time_to_first_review_hours', 0)} sa` • Merge `{det_pr.get('time_to_merge_hours', 0)} sa`\n"
+                        f"- **Veri Kalitesi:** `{det_pr.get('data_quality_flag', 'Clean')}`"
+                    )
+                    if str(det_pr.get("review_comments", "")).strip():
+                        st.caption(f"**💬 İnceleme Yorumları:** {det_pr.get('review_comments')}")
+                with p2:
+                    st.markdown(
+                        f"<div class='xai-box' style='margin-bottom:0.75rem;'>"
+                        f"<div style='font-weight:700; font-size:0.78rem; color:#fbbf24;'>🧠 XAI PR Risk Nedenleri</div>"
+                        f"<div style='font-size:0.88rem; margin-top:0.25rem;'>{det_pr.get('xai_pr_risk_factors', '-')}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f"<div class='action-box'>"
+                        f"<div style='font-weight:700; font-size:0.78rem; color:#2dd4bf;'>💡 XAI PR Önerisi</div>"
+                        f"<div style='font-size:0.88rem; margin-top:0.25rem;'>{det_pr.get('xai_pr_recommended_actions', '-')}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                if str(det_pr.get("diff_code_changes", "")).strip():
+                    with st.expander("🧾 Kod Değişikliği (Diff) Önizlemesi", expanded=False):
+                        st.code(str(det_pr.get("diff_code_changes", "")), language="diff")
 
 
 if __name__ == "__main__":
