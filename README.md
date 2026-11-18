@@ -179,7 +179,7 @@ py -m streamlit run dashboard.py --server.headless true
 
 ---
 
-### B. Dashboard'da Yer Alan 6 Ana Sekme ve İçerik Detayları
+### B. Dashboard'da Yer Alan 7 Ana Sekme ve İçerik Detayları
 
 #### 📡 1. Erken Uyarı & Genel Bakış (`Sekme 1`)
 - **🚨 Acil Müdahale Bekleyen Görevler Tablosu:** Yatay kaydırma karmaşasını önlemek için en kritik 7 sütunla (*Görev, Proje & Modül, Sorumlu & Teslim, Erken Risk Skoru, Neden Riskli? (XAI Özeti), Önerilen Müdahale, İncele*) özetlenmiştir. Satıra tıklandığında doğrudan 2. sekmedeki görev müfettişini açar.
@@ -210,6 +210,18 @@ Seçilen veya ID ile aranan (`TASK-100001` vb.) tek bir görevin neden riskli ol
 - **🎯 Önerilen Müdahale Aksiyonlarına Göre Görev Özeti:** Hangi karar destek aksiyonunun kaç açık ve toplam görev için önerildiğini ve ortalama risk skorunu gruplayarak gösterir.
 - **📊 CSV ve 📄 JSON Rapor İndirme:** Seçili filtrelere göre en yüksek riskli görevlerin ve XAI aksiyon önerilerinin tam listesini yönetim toplantıları veya Jira/DevOps entegrasyonu için dışa aktarır ve ilk 50 kaydın önizlemesini sunar.
 
+#### 🗂️ 7. Tüm Task & PR Veri Gezgini (`Sekme 7`)
+Büyük veri setindeki yüz binlerce kaydı tarayıcıyı veya belleği yormadan derinlemesine incelemek, aramak, filtrelemek ve tek tek analiz etmek için geliştirilmiş kapsamlı veri keşif motoru:
+- **📋 Görevler (Tasks) ve 🔀 Pull Requestler (PRs) İkili Modu:** Tek tıkla görev odaklı veya kod entegrasyonu odaklı veri görünümüne geçiş imkanı.
+- **🔎 Akıllı Çok Boyutlu Arama:** ID (`TASK-100005`, `PR-200012`), başlık, sorumlu, modül, bağlı görev kimliği, merge conflict, güvenlik durumu ve XAI risk nedenleri üzerinde anlık serbest metin araması.
+- **🎯 Dinamik Durum ve Risk Filtreleri:** Görev/PR durumuna (`Open`, `In Progress`, `Done`, `Merged`, `Closed` vb.) ve risk seviyesine (`Critical`, `High`, `Medium`, `Low`) göre anlık daraltma.
+- **⚡ Akıllı Sıralama Seçenekleri:** Risk skoru (yüksekten düşüğe / düşükten yükseğe), ID, gecikme gün sayısı, teslim tarihi, değişen dosya sayısı veya merge süresine göre anlık sıralama.
+- **📄 Yüksek Performanslı Sayfalama (Pagination):** 25, 50, 100 ve 250'lik sayfa boyutu seçenekleriyle on binlerce kaydı akıcı şekilde listeleme ve sayfa no ile anında gezinme.
+- **📊 Zengin Veri Tablosu:** Görev ve PR özniteliklerinin (planlanan/gerçekleşen efor, blocker, sprint, lines added/deleted, pipeline hataları, XAI açıklamaları, 5V Veracity bayrakları vb.) derli toplu grid görünümü.
+- **🔍 Seçili Kayıt Tam Detay Kartı (Deep-Dive Inspection):**
+  - **Görev İnceleme:** Proje, modül, tür, öncelik, ortam, sorumlu, sprint, efor sapması, blocker sayısı, ön koşul bağımlılıkları, tam görev açıklaması, kabul kriterleri ve özel **XAI Risk Teşhisi** ile **Karar Destek Reçetesi**.
+  - **PR İnceleme:** Bağlı görev özeti ve referansı, merge conflict durumu, CI/CD pipeline kırılma analizi, güvenlik taraması, inceleme yorumları, **XAI PR Risk Nedenleri & Önerisi** ve açılır-kapanır **`git diff` kod yaması önizlemesi**.
+
 ---
 
 ## 6. Vercel Dağıtımı (Serverless & Edge CDN Mimarisi)
@@ -231,7 +243,7 @@ Proje, hem yerel **Streamlit (`dashboard.py`)** hem de **Vercel Serverless + Web
 
 ## 7. Büyük Veri (Big Data) Güncellemeleri ve Dağıtık Mimari (Replication Factor = 3)
 
-Hocamızın ve jürinin büyük veri kriterleri doğrultusunda projeye 4 ana genişletme entegre edilmiştir:
+Büyük veri kriterleri doğrultusunda projeye 4 ana genişletme entegre edilmiştir:
 
 ### 1. Hacim Genişletme (1 GB+ CSV Veri Seti)
 - `generate_bigdata.py` motoru bellek dostu (memory-efficient streaming) mimariye kavuşturulmuştur.
